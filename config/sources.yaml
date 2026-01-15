@@ -1,0 +1,73 @@
+# Fuentes de contenido para scraping
+# Formato: lista de URLs/identificadores por tipo
+
+rss:
+  # Feeds de salud y bienestar
+  feeds:
+    - url: "https://www.healthline.com/rss/nutrition"
+      category: "nutrition"
+    - url: "https://www.mindbodygreen.com/rss"
+      category: "wellness"
+    - url: "https://feeds.feedburner.com/zenhabits"
+      category: "habits"
+  
+  # Filtros
+  keywords:
+    include:
+      - health
+      - wellness
+      - nutrition
+      - sleep
+      - exercise
+      - mental health
+      - habits
+      - mindfulness
+    exclude:
+      - advertisement
+      - sponsored
+
+reddit:
+  # Subreddits a monitorear
+  subreddits:
+    - name: "HealthyFood"
+      limit: 10
+    - name: "GetMotivated"
+      limit: 10
+    - name: "Fitness"
+      limit: 10
+    - name: "Sleep"
+      limit: 5
+    - name: "Meditation"
+      limit: 5
+  
+  # Configuración
+  sort: "hot"  # hot, new, top
+  time_filter: "week"  # hour, day, week, month, year, all
+
+youtube:
+  # Canales a monitorear
+  channels:
+    - id: "UCNjPtOCvMrKY5eLwr_-7eUg"  # Ejemplo
+      name: "Health Channel"
+  
+  # Búsquedas
+  searches:
+    - query: "healthy habits short"
+      max_results: 5
+    - query: "nutrition tips"
+      max_results: 5
+
+blogs:
+  # URLs de blogs específicos
+  urls:
+    - url: "https://jamesclear.com/articles"
+      selector: "article"
+    - url: "https://markmanson.net/articles"
+      selector: ".post-content"
+
+# Límites generales
+limits:
+  max_items_per_source: 10
+  cache_ttl_hours: 24
+  min_content_length: 100
+  max_content_length: 5000

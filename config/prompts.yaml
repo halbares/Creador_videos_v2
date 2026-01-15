@@ -1,0 +1,106 @@
+# Prompts para el guionista LLM
+# Optimizados para RETENCIÓN máxima en Shorts/Reels
+
+system_prompt: |
+  Actúa como un **guionista experto en contenido viral de vida saludable** enfocado en retención alta para Shorts y Reels.
+  
+  Tu objetivo es transformar texto en un guion optimizado para máxima retención.
+  
+  REGLAS ESTRICTAS:
+  1. Frases cortas (máximo 12 palabras por frase)
+  2. Lenguaje simple, directo, emocional
+  3. NO tecnicismos médicos pesados
+  4. Temas: bienestar físico y mental (nutrición, hábitos, sueño, movimiento)
+  5. SIEMPRE incluir puntuación correcta (comas, puntos) para pausas naturales en TTS
+  6. El guión debe durar entre 45-60 segundos cuando se lee en voz alta
+
+script_template: |
+  Transforma el siguiente contenido en un guion viral.
+  
+  ESTRUCTURA OBLIGATORIA:
+  1. HOOK IMPACTANTE (0-3 segundos): Pregunta provocadora o dato sorprendente
+  2. PROMESA CLARA (3-6 segundos): Qué va a ganar el espectador
+  3. DESARROLLO (6-45 segundos): 2-3 ideas prácticas con ejemplos concretos
+  4. MICRO-ACCIÓN (45-50 segundos): Algo que pueden hacer HOY MISMO
+  5. CIERRE EMOCIONAL (50-55 segundos): Conexión humana
+  6. LOOP (55-60 segundos): Frase que conecte con el hook para que vuelvan a ver
+  
+  CONTENIDO FUENTE:
+  {source_content}
+  
+  URL FUENTE (para referencia): {source_url}
+  
+  RESPONDE EN FORMATO JSON EXACTO:
+  {{
+    "title": "Título atractivo del video",
+    "narration_text": "Texto completo para narración con puntuación correcta",
+    "subtitles": [
+      {{"start": 0.00, "end": 3.00, "text": "Hook aquí"}},
+      {{"start": 3.00, "end": 6.00, "text": "Promesa aquí"}},
+      ...continúa hasta el final
+    ],
+    "hooks_alternativos": [
+      "Hook alternativo 1",
+      "Hook alternativo 2",
+      "Hook alternativo 3"
+    ],
+    "keywords": ["keyword1", "keyword2", "keyword3"]
+  }}
+
+hooks_regeneration: |
+  Basándote en el siguiente contenido, genera 3 hooks alternativos para un video viral.
+  
+  Cada hook debe:
+  - Durar máximo 3 segundos al leerse
+  - Ser impactante e intrigante
+  - Generar curiosidad inmediata
+  - Usar emociones: sorpresa, miedo, curiosidad, identificación
+  
+  CONTENIDO:
+  {content}
+  
+  HOOKS EXISTENTES (para variar):
+  {existing_hooks}
+  
+  RESPONDE EN JSON:
+  {{
+    "hooks": [
+      {{"text": "Hook 1", "emotion": "sorpresa"}},
+      {{"text": "Hook 2", "emotion": "curiosidad"}},
+      {{"text": "Hook 3", "emotion": "identificación"}}
+    ]
+  }}
+
+validation_rules:
+  min_narration_length: 200
+  max_narration_length: 800
+  min_subtitles: 8
+  max_subtitle_duration: 4.0
+  max_words_per_subtitle: 15
+  required_fields:
+    - narration_text
+    - subtitles
+    - hooks_alternativos
+
+# Palabras de poder para retención
+power_words:
+  urgency:
+    - ahora
+    - hoy
+    - inmediatamente
+    - ya mismo
+  curiosity:
+    - secreto
+    - descubre
+    - nadie te dice
+    - la verdad sobre
+  emotion:
+    - transforma
+    - cambia tu vida
+    - nunca más
+    - por fin
+  specificity:
+    - en 5 minutos
+    - con un solo paso
+    - científicamente probado
+    - estudios demuestran

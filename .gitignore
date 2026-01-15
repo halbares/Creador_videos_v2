@@ -1,0 +1,32 @@
+# Ignorar entorno virtual
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Archivos de entorno
+.env
+
+# Directorios de datos
+cache/
+temp/
+output/
+
+# Modelos descargados (muy pesados)
+models/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+assets/*.mp4
+assets/*.jpg
+assets/*.png

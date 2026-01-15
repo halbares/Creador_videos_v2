@@ -1,0 +1,59 @@
+[project]
+name = "creador-videos-virales"
+version = "1.0.0"
+description = "Sistema automatizado para crear videos cortos virales sobre vida saludable"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Pablo", email = "pablo@example.com"}
+]
+
+dependencies = [
+    # TTS - XTTS v2
+    "TTS>=0.22.0",
+    
+    # LLM - OpenRouter (compatible OpenAI)
+    "openai>=1.0.0",
+    
+    # Scraping
+    "feedparser>=6.0.0",
+    "praw>=7.7.0",
+    "yt-dlp>=2024.0.0",
+    "beautifulsoup4>=4.12.0",
+    "httpx>=0.27.0",
+    
+    # Video/Audio
+    "pydub>=0.25.0",
+    
+    # Utils
+    "pyyaml>=6.0",
+    "tenacity>=8.2.0",
+    "diskcache>=5.6.0",
+    "python-dotenv>=1.0.0",
+    "rich>=13.0.0",
+    
+    # Pexels API
+    "requests>=2.31.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.3.0",
+]
+
+[project.scripts]
+creador = "src.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = ["E501"]
