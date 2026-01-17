@@ -68,6 +68,24 @@ python -m src.pipeline --scrape
 python -m src.pipeline --pending
 ```
 
+### 📤 Publicación en la Nube
+```bash
+# Publicar un video existente
+python -m src.pipeline --publish output/mi_video/video.mp4
+
+# Pipeline sin publicar (solo generar localmente)
+python -m src.pipeline --full --no-publish
+
+# Publicar automáticamente (sin confirmación)
+python -m src.pipeline --full --publish-mode automatic
+
+# Ver cola de publicaciones pendientes
+python -m src.pipeline --publish-queue
+
+# Reintentar publicaciones fallidas
+python -m src.pipeline --retry-failed
+```
+
 ## 📂 Estructura del Proyecto
 
 ```
@@ -77,6 +95,10 @@ Creador_videos_v2/
 │   ├── llm/          # Generación de guiones
 │   ├── tts/          # Text-to-Speech (Edge-TTS)
 │   ├── video/        # Renderizado y subtítulos
+│   ├── publisher/    # Publicación a la nube
+│   │   ├── cloud_uploader.py  # Wrapper rclone
+│   │   ├── make_webhook.py    # Cliente Make.com
+│   │   └── retry_queue.py     # Cola de reintentos
 │   └── pipeline.py   # Orquestador principal
 ├── config/
 │   ├── prompts.yaml  # Prompts para el LLM

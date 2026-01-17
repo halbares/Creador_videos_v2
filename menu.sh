@@ -363,6 +363,105 @@ clean_temp() {
     read -p "Presiona Enter para continuar..."
 }
 
+# Menú de publicación
+menu_publish() {
+    show_banner
+    echo -e "${CYAN}📤 PUBLICAR VIDEO${NC}"
+    echo ""
+    echo -e "  ${WHITE}1.${NC} Publicar video existente"
+    echo -e "  ${WHITE}2.${NC} Ver cola de publicaciones pendientes"
+    echo -e "  ${WHITE}3.${NC} Reintentar publicaciones fallidas"
+    echo -e "  ${WHITE}4.${NC} Limpiar cola de reintentos"
+    echo -e "  ${WHITE}5.${NC} Test de conexión a Google Drive"
+    echo -e "  ${WHITE}6.${NC} Test de webhook Make.com"
+    echo -e "  ${WHITE}7.${NC} 🗑️  Limpiar archivos antiguos de Drive"
+    echo -e "  ${WHITE}0.${NC} Volver al menú principal"
+    echo ""
+    read -p "Selecciona una opción: " choice
+    
+    case $choice in
+        1)
+            echo ""
+            echo -e "${CYAN}Videos disponibles en output/:${NC}"
+            echo ""
+            
+            # Listar carpetas de video
+            videos=()
+            while IFS= read -r -d '' dir; do
+                video_file=$(find "$dir" -maxdepth 1 -name "*.mp4" -print -quit 2>/dev/null)
+                if [ -n "$video_file" ]; then
+                    videos+=("$video_file")
+                    echo "  $(( ${#videos[@]} )). $(basename "$dir")"
+                fi
+            done < <(find output -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null | sort -z)
+            
+            if [ ${#videos[@]} -eq 0 ]; then
+                echo -e "${YELLOW}No hay videos para publicar${NC}"
+            else
+                echo ""
+                read -p "Selecciona video (número): " video_num
+                
+                if [[ "$video_num" =~ ^[0-9]+$ ]] && [ "$video_num" -ge 1 ] && [ "$video_num" -le ${#videos[@]} ]; then
+                    selected_video="${videos[$((video_num-1))]}"
+                    echo ""
+                    echo -e "${CYAN}Publicando: ${selected_video}${NC}"
+                    activate_venv && python -m src.pipeline --publish "$selected_video"
+                else
+                    echo -e "${RED}Selección inválida${NC}"
+                fi
+            fi
+            ;;
+        2)
+            echo ""
+            activate_venv && python -m src.pipeline --publish-queue
+            ;;
+        3)
+            echo ""
+            activate_venv && python -m src.pipeline --retry-failed
+            ;;
+        4)
+            echo ""
+            echo -e "${YELLOW}⚠ Esto eliminará todos los items de la cola de reintentos${NC}"
+            read -p "¿Estás seguro? (s/n): " confirm
+            if [[ "$confirm" =~ ^[Ss]$ ]]; then
+                activate_venv && python -m src.publisher.retry_queue --clear
+            fi
+            ;;
+        5)
+            echo ""
+            echo -e "${CYAN}Verificando conexión a Google Drive...${NC}"
+            activate_venv && python -m src.publisher.cloud_uploader --test
+            ;;
+        6)
+            echo ""
+            echo -e "${CYAN}Verificando webhook de Make.com...${NC}"
+            activate_venv && python -m src.publisher.make_webhook --test
+            ;;
+        7)
+            echo ""
+            echo -e "${CYAN}🗑️  LIMPIAR ARCHIVOS DE GOOGLE DRIVE${NC}"
+            echo ""
+            read -p "¿Cuántos días de antigüedad mínima? (default: 7): " days
+            days=${days:-7}
+            
+            echo ""
+            echo -e "${YELLOW}Buscando archivos > ${days} días...${NC}"
+            activate_venv && python -m src.publisher.cloud_uploader --cleanup --days "$days"
+            
+            echo ""
+            read -p "¿Eliminar estos archivos? (s/n): " confirm
+            if [[ "$confirm" =~ ^[Ss]$ ]]; then
+                activate_venv && python -m src.publisher.cloud_uploader --cleanup --days "$days" --confirm
+                echo -e "${GREEN}✓ Archivos eliminados${NC}"
+            fi
+            ;;
+        0) return ;;
+        *) echo -e "${RED}Opción inválida${NC}" ;;
+    esac
+    
+    read -p "Presiona Enter para continuar..."
+}
+
 # Menú principal
 main_menu() {
     while true; do
@@ -377,6 +476,7 @@ main_menu() {
         echo -e "  ${CYAN}4.${NC} 🎬 Renderizar video (FFmpeg)"
         echo -e "  ${GREEN}5.${NC} 🚀 Pipeline completo (automático)"
         echo -e "  ${WHITE}6.${NC} 📂 Ver videos generados"
+        echo -e "  ${PURPLE}9.${NC} 📤 Publicar video"
         echo -e "  ${WHITE}7.${NC} ⚙️  Configuración"
         echo -e "  ${WHITE}8.${NC} 🧹 Limpiar archivos temporales"
         echo -e "  ${RED}0.${NC} ❌ Salir"
@@ -397,6 +497,7 @@ main_menu() {
                 ;;
             7) menu_config ;;
             8) clean_temp ;;
+            9) menu_publish ;;
             0) 
                 echo -e "${GREEN}¡Hasta luego!${NC}"
                 exit 0

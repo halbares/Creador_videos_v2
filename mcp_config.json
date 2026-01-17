@@ -1,0 +1,10 @@
+{
+    "mcpServers": {
+        "make": {
+            "command": "/home/pablo/Proyectos/MCP-MAKE/venv/bin/python",
+            "args": [
+                "/home/pablo/Proyectos/MCP-MAKE/server.py"
+            ]
+        }
+    }
+}

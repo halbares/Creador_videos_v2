@@ -21,6 +21,7 @@ from .llm import OpenRouterClient, ScriptValidator
 from .tts.edge_tts import EdgeTTSEngine
 from .video import SubtitleGenerator, VideoRenderer, PexelsClient
 from .utils import ContentCache
+from .publisher import CloudUploader, MakeWebhookClient, RetryQueue
 
 load_dotenv()
 logger = logging.getLogger(__name__)
@@ -65,6 +66,9 @@ class VideoPipeline:
         self._subtitle_gen = None
         self._renderer = None
         self._pexels = None
+        self._uploader = None
+        self._webhook = None
+        self._retry_queue = None
     
     @property
     def llm_client(self) -> OpenRouterClient:
@@ -102,6 +106,24 @@ class VideoPipeline:
         if self._pexels is None:
             self._pexels = PexelsClient(assets_dir=str(self.assets_dir))
         return self._pexels
+    
+    @property
+    def uploader(self) -> CloudUploader:
+        if self._uploader is None:
+            self._uploader = CloudUploader()
+        return self._uploader
+    
+    @property
+    def webhook(self) -> MakeWebhookClient:
+        if self._webhook is None:
+            self._webhook = MakeWebhookClient()
+        return self._webhook
+    
+    @property
+    def retry_queue(self) -> RetryQueue:
+        if self._retry_queue is None:
+            self._retry_queue = RetryQueue(str(self.cache_dir))
+        return self._retry_queue
     
     def _generate_video_metadata(
         self,
@@ -508,12 +530,202 @@ Usa estos hooks para versiones del video o para probar engagement:
         
         return video_path
     
+    def step_publish(
+        self,
+        video_path: str,
+        script: dict,
+        mode: Optional[str] = None,
+        destinations: Optional[list[str]] = None
+    ) -> Optional[dict]:
+        """
+        Paso 7: Publicar video a la nube y redes sociales.
+        
+        Args:
+            video_path: Ruta local del video
+            script: Dict del guión con metadata
+            mode: 'interactive' o 'automatic' (default desde .env)
+            destinations: Lista de destinos ['facebook', 'youtube']
+            
+        Returns:
+            Dict con resultado de la publicación o None
+        """
+        console.print(Panel("[bold cyan]PASO 7: Publicando video[/bold cyan]"))
+        
+        # Obtener modo desde .env si no se especifica
+        if mode is None:
+            mode = os.getenv("PUBLISH_MODE", "interactive")
+        
+        # Obtener destinos desde .env si no se especifica
+        if destinations is None:
+            dest_env = os.getenv("PUBLISH_DESTINATIONS", "facebook,youtube")
+            destinations = [d.strip() for d in dest_env.split(",")]
+        
+        # Verificar que webhook está configurado
+        if not self.webhook.is_configured():
+            console.print("[yellow]⚠ Webhook no configurado. Configura MAKE_WEBHOOK_URL en .env[/yellow]")
+            console.print("[dim]El video fue guardado localmente pero no se publicará.[/dim]")
+            return None
+        
+        # Modo interactivo: pedir confirmación
+        if mode == "interactive":
+            console.print(f"\n[cyan]Video: {video_path}[/cyan]")
+            console.print(f"[cyan]Destinos: {', '.join(destinations)}[/cyan]")
+            console.print("")
+            
+            try:
+                confirm = input("¿Publicar este video? (s/n): ").strip().lower()
+                if confirm not in ("s", "si", "sí", "y", "yes"):
+                    console.print("[yellow]Publicación cancelada por el usuario[/yellow]")
+                    return None
+            except (KeyboardInterrupt, EOFError):
+                console.print("\n[yellow]Publicación cancelada[/yellow]")
+                return None
+        
+        # Paso 7.1: Subir a Google Drive
+        console.print("\n[dim]7.1 Subiendo a Google Drive...[/dim]")
+        
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+            task = progress.add_task("Subiendo video...", total=None)
+            
+            upload_result = self.uploader.upload_and_get_link(video_path)
+            
+            if upload_result:
+                progress.update(task, description="[green]✓ Video subido a Google Drive")
+            else:
+                progress.update(task, description="[red]✗ Error subiendo video")
+        
+        if not upload_result:
+            error_msg = "Error subiendo video a Google Drive"
+            console.print(f"[red]{error_msg}[/red]")
+            
+            # Guardar en cola de reintentos
+            self.retry_queue.add(
+                video_path=video_path,
+                script=script,
+                error=error_msg,
+                destinations=destinations
+            )
+            console.print("[yellow]Video guardado en cola de reintentos[/yellow]")
+            return None
+        
+        remote_path = upload_result["remote_path"]
+        public_url = upload_result["public_url"]
+        
+        console.print(f"[green]URL: {public_url[:60]}...[/green]")
+        
+        # Paso 7.2: Enviar a Make.com
+        console.print("\n[dim]7.2 Enviando a Make.com...[/dim]")
+        
+        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+            task = progress.add_task("Enviando webhook...", total=None)
+            
+            webhook_result = self.webhook.publish_from_metadata(
+                video_url=public_url,
+                script=script,
+                destinations=destinations
+            )
+            
+            if webhook_result["success"]:
+                progress.update(task, description="[green]✓ Webhook enviado exitosamente")
+            else:
+                progress.update(task, description="[red]✗ Error enviando webhook")
+        
+        if not webhook_result["success"]:
+            error_msg = webhook_result.get("error", "Error desconocido")
+            console.print(f"[red]Error: {error_msg}[/red]")
+            
+            # Guardar en cola de reintentos (ya tenemos la URL)
+            self.retry_queue.add(
+                video_path=video_path,
+                script=script,
+                error=error_msg,
+                remote_path=remote_path,
+                video_url=public_url,
+                destinations=destinations
+            )
+            console.print("[yellow]Video guardado en cola de reintentos[/yellow]")
+            return None
+        
+        # Éxito total
+        console.print(f"\n[bold green]📤 Video publicado exitosamente![/bold green]")
+        console.print(f"[green]Destinos: {', '.join(destinations)}[/green]")
+        
+        return {
+            "success": True,
+            "video_path": video_path,
+            "remote_path": remote_path,
+            "public_url": public_url,
+            "destinations": destinations,
+            "webhook_response": webhook_result.get("response")
+        }
+    
+    def retry_failed_publications(self) -> list[dict]:
+        """
+        Reintenta publicar videos de la cola de fallos.
+        
+        Returns:
+            Lista de resultados
+        """
+        pending = self.retry_queue.get_pending()
+        
+        if not pending:
+            console.print("[yellow]No hay publicaciones pendientes en la cola[/yellow]")
+            return []
+        
+        console.print(f"[cyan]Reintentando {len(pending)} publicaciones fallidas...[/cyan]\n")
+        
+        results = []
+        
+        for i, item in enumerate(pending):
+            console.print(f"[dim]--- Item {i + 1} de {len(pending)} ---[/dim]")
+            
+            # Si ya tiene URL, solo reintentar webhook
+            if item.video_url:
+                console.print("[dim]URL ya disponible, reintentando webhook...[/dim]")
+                
+                webhook_result = self.webhook.publish_from_metadata(
+                    video_url=item.video_url,
+                    script=item.script,
+                    destinations=item.destinations
+                )
+                
+                if webhook_result["success"]:
+                    self.retry_queue.remove(i - len([r for r in results if r.get("success")]))
+                    console.print("[green]✓ Publicación exitosa[/green]\n")
+                    results.append({"success": True, "video": item.video_path})
+                else:
+                    self.retry_queue.update_attempt(i, webhook_result.get("error"))
+                    console.print(f"[red]✗ Falló nuevamente: {webhook_result.get('error')}[/red]\n")
+                    results.append({"success": False, "video": item.video_path})
+            else:
+                # Necesita subir primero
+                result = self.step_publish(
+                    video_path=item.video_path,
+                    script=item.script,
+                    mode="automatic",
+                    destinations=item.destinations
+                )
+                
+                if result and result.get("success"):
+                    self.retry_queue.remove_by_path(item.video_path)
+                    results.append({"success": True, "video": item.video_path})
+                else:
+                    results.append({"success": False, "video": item.video_path})
+        
+        # Resumen
+        success_count = len([r for r in results if r.get("success")])
+        console.print(f"\n[bold]Completados: {success_count} de {len(pending)}[/bold]")
+        
+        return results
+    
     def run_full_pipeline(
         self,
         sources: Optional[list[str]] = None,
         prefer_video_bg: bool = True,
         image_effect: str = "zoom",
-        skip_scrape: bool = False
+        skip_scrape: bool = False,
+        publish: bool = True,
+        publish_mode: Optional[str] = None
     ) -> Optional[str]:
         """
         Ejecuta el pipeline completo para UN video.
@@ -523,13 +735,15 @@ Usa estos hooks para versiones del video o para probar engagement:
             prefer_video_bg: Si preferir video sobre imagen de fondo
             image_effect: Efecto para imágenes de fondo
             skip_scrape: Si saltar el paso de scraping
+            publish: Si publicar el video después de generarlo
+            publish_mode: 'interactive' o 'automatic' (default desde .env)
             
         Returns:
             Ruta al video final o None
         """
         console.print(Panel(
             "[bold magenta]🚀 PIPELINE COMPLETO[/bold magenta]\n"
-            "Scraping → LLM → TTS → Video",
+            "Scraping → LLM → TTS → Video → Publicar",
             title="Creador de Videos Virales"
         ))
         
@@ -606,6 +820,23 @@ Usa estos hooks para versiones del video o para probar engagement:
             console.print(f"[green]✓ Metadata generada: {metadata_path}[/green]")
             console.print(f"\n[bold green]🎬 Video listo: {new_video_path}[/bold green]\n")
             
+            # Paso 7: Publicar (opcional)
+            if publish:
+                # Guardar duración en el script para metadata
+                if audio_result and "duration" in audio_result:
+                    script["_duration"] = audio_result["duration"]
+                
+                publish_result = self.step_publish(
+                    video_path=str(new_video_path),
+                    script=script,
+                    mode=publish_mode
+                )
+                
+                if not publish_result:
+                    console.print("[yellow]Video guardado localmente (publicación pendiente)[/yellow]")
+            else:
+                console.print("[dim]Publicación omitida (--no-publish)[/dim]")
+            
             return str(new_video_path)
             
         except KeyboardInterrupt:
@@ -622,7 +853,9 @@ Usa estos hooks para versiones del video o para probar engagement:
         sources: Optional[list[str]] = None,
         prefer_video_bg: bool = True,
         image_effect: str = "zoom",
-        process_all_pending: bool = False
+        process_all_pending: bool = False,
+        publish: bool = True,
+        publish_mode: Optional[str] = None
     ) -> list[str]:
         """
         Ejecuta el pipeline para múltiples videos.
@@ -633,6 +866,8 @@ Usa estos hooks para versiones del video o para probar engagement:
             prefer_video_bg: Si preferir video sobre imagen de fondo
             image_effect: Efecto para imágenes de fondo
             process_all_pending: Si procesar todo el cache pendiente
+            publish: Si publicar los videos después de generarlos
+            publish_mode: 'interactive' o 'automatic' (default desde .env)
             
         Returns:
             Lista de rutas a videos generados
@@ -677,7 +912,9 @@ Usa estos hooks para versiones del video o para probar engagement:
                     sources=sources,
                     prefer_video_bg=prefer_video_bg,
                     image_effect=image_effect,
-                    skip_scrape=True  # No repetir scraping
+                    skip_scrape=True,  # No repetir scraping
+                    publish=publish,
+                    publish_mode=publish_mode
                 )
                 
                 if video_path:
@@ -738,6 +975,14 @@ def main():
     parser.add_argument("--effect", choices=["zoom", "pan", "kenburns"], default="zoom",
                        help="Efecto para imágenes de fondo")
     
+    # Opciones de publicación
+    parser.add_argument("--no-publish", action="store_true", help="No publicar después de generar")
+    parser.add_argument("--publish-mode", choices=["interactive", "automatic"],
+                       help="Modo de publicación (default: desde .env)")
+    parser.add_argument("--retry-failed", action="store_true", help="Reintentar publicaciones fallidas")
+    parser.add_argument("--publish-queue", action="store_true", help="Ver cola de publicaciones pendientes")
+    parser.add_argument("--publish", help="Publicar un video existente (ruta)")
+    
     args = parser.parse_args()
     
     pipeline = VideoPipeline()
@@ -748,7 +993,44 @@ def main():
             console.print(f"[cyan]Contenido pendiente en cache: {count} items[/cyan]")
             return
         
+        if args.publish_queue:
+            summary = pipeline.retry_queue.get_summary()
+            console.print(f"\n[cyan]Cola de publicaciones pendientes: {summary['count']} items[/cyan]")
+            for item in summary.get("items", []):
+                console.print(f"  • {item['video']} ({item['attempts']} intentos)")
+            return
+        
+        if args.retry_failed:
+            pipeline.retry_failed_publications()
+            return
+        
+        if args.publish:
+            # Publicar video existente
+            from pathlib import Path
+            video_path = Path(args.publish)
+            if not video_path.exists():
+                console.print(f"[red]Video no encontrado: {args.publish}[/red]")
+                return
+            
+            # Cargar metadata si existe
+            metadata_path = video_path.parent / "metadata.md"
+            script = {}
+            if metadata_path.exists():
+                # Extraer título del metadata
+                with open(metadata_path, "r") as f:
+                    content = f.read()
+                    if content.startswith("# "):
+                        script["title"] = content.split("\n")[0][2:]
+            
+            pipeline.step_publish(
+                video_path=str(video_path),
+                script=script,
+                mode=args.publish_mode
+            )
+            return
+        
         prefer_video = not args.image_bg
+        publish = not args.no_publish
         
         if args.batch:
             # Modo batch: procesar todo el cache
@@ -756,7 +1038,9 @@ def main():
                 process_all_pending=True,
                 sources=args.sources,
                 prefer_video_bg=prefer_video,
-                image_effect=args.effect
+                image_effect=args.effect,
+                publish=publish,
+                publish_mode=args.publish_mode
             )
         elif args.full or args.count > 1:
             # Con --count o --full
@@ -765,13 +1049,17 @@ def main():
                     count=args.count,
                     sources=args.sources,
                     prefer_video_bg=prefer_video,
-                    image_effect=args.effect
+                    image_effect=args.effect,
+                    publish=publish,
+                    publish_mode=args.publish_mode
                 )
             else:
                 pipeline.run_full_pipeline(
                     sources=args.sources,
                     prefer_video_bg=prefer_video,
-                    image_effect=args.effect
+                    image_effect=args.effect,
+                    publish=publish,
+                    publish_mode=args.publish_mode
                 )
         elif args.scrape:
             pipeline.step_scrape(args.sources)
