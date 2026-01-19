@@ -15,3 +15,5 @@ Esta es la nueva versión del generador de videos, reescrita desde cero para sop
 1.  **Fase 1:** Motor de Audio (Whisper + TTS).
 2.  **Fase 2:** Director de Escenas (Scripting Dinámico).
 3.  **Fase 3:** Compositor Visual (FFmpeg/MoviePy).
+4.  **Fase 4:** Orquestación e Integración.
+5.  **Fase 5 (Futuro):** Módulo de Publicación (Dropbox/Drive).
