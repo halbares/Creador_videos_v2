@@ -314,10 +314,15 @@ Usa estos hooks para versiones del video o para probar engagement:
         text_parts = []
         if content.get("title"):
             text_parts.append(f"Título: {content['title']}")
-        if content.get("summary"):
-            text_parts.append(f"Resumen: {content['summary']}")
+        
+        # Prioridad de contenido: Transcripción > Contenido > Resumen
+        if content.get("transcript"):
+            text_parts.append(f"Transcripción del video:\n{content['transcript']}")
         elif content.get("content"):
             text_parts.append(f"Contenido: {content['content']}")
+        elif content.get("summary"):
+            text_parts.append(f"Resumen: {content['summary']}")
+            
         if content.get("top_comments"):
             text_parts.append(f"Comentarios: {' | '.join(content['top_comments'][:3])}")
         
@@ -855,7 +860,9 @@ Usa estos hooks para versiones del video o para probar engagement:
         image_effect: str = "zoom",
         process_all_pending: bool = False,
         publish: bool = True,
-        publish_mode: Optional[str] = None
+        publish_mode: Optional[str] = None,
+        skip_scrape: bool = False,
+        filter_urls: Optional[list[str]] = None
     ) -> list[str]:
         """
         Ejecuta el pipeline para múltiples videos.
@@ -868,6 +875,8 @@ Usa estos hooks para versiones del video o para probar engagement:
             process_all_pending: Si procesar todo el cache pendiente
             publish: Si publicar los videos después de generarlos
             publish_mode: 'interactive' o 'automatic' (default desde .env)
+            skip_scrape: Si saltar el paso de scraping global
+            filter_urls: Lista de URLs específicas para procesar (ignora el resto del cache)
             
         Returns:
             Lista de rutas a videos generados
@@ -881,11 +890,20 @@ Usa estos hooks para versiones del video o para probar engagement:
         ))
         
         # Paso 1: Scraping (solo una vez)
-        console.print("\n[bold cyan]Fase 1: Obteniendo contenido...[/bold cyan]")
-        self.step_scrape(sources)
+        if not skip_scrape:
+            console.print("\n[bold cyan]Fase 1: Obteniendo contenido...[/bold cyan]")
+            self.step_scrape(sources)
+        else:
+            console.print("\n[dim]Fase 1: Scraping omitido (usando contenido cazado)[/dim]")
         
         # Determinar cuántos videos procesar
         pending = self.cache.get_pending_content()
+        
+        # Filtrar por URLs si se especifica (Trend Hunter)
+        if filter_urls:
+            original_count = len(pending)
+            pending = [p for p in pending if p.get('url') in filter_urls]
+            console.print(f"[cyan]Filtrando cache: {len(pending)} de {original_count} items seleccionados[/cyan]")
         
         if process_all_pending:
             videos_to_generate = len(pending)
@@ -983,11 +1001,93 @@ def main():
     parser.add_argument("--publish-queue", action="store_true", help="Ver cola de publicaciones pendientes")
     parser.add_argument("--publish", help="Publicar un video existente (ruta)")
     
+    # Nuevas opciones
+    parser.add_argument("--trend-hunter", type=int, help="Buscar tendencias y generar N videos automáticamente")
+    
     args = parser.parse_args()
     
     pipeline = VideoPipeline()
     
     try:
+        if args.trend_hunter:
+            count = args.trend_hunter
+            console.print(Panel(
+                f"[bold magenta]🚀 TREND HUNTER (Inglés → Español)[/bold magenta]\n"
+                f"Buscando {count} tendencias virales para adaptar...",
+                title="Creador de Videos Virales"
+            ))
+            
+            from .scraper import YouTubeClient
+            import random
+            
+            yt_client = YouTubeClient(cache=pipeline.cache)
+            searches = yt_client.config.get("searches", [])
+            
+            if not searches:
+                console.print("[red]No hay búsquedas configuradas en sources.yaml[/red]")
+                return
+
+            videos_found = []
+            attempts = 0
+            max_attempts = 5
+            
+            with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
+                task = progress.add_task("Cazando tendencias...", total=count)
+                
+                while len(videos_found) < count and attempts < max_attempts:
+                    # Seleccionar tema aleatorio
+                    search_config = random.choice(searches)
+                    query = search_config.get("query")
+                    
+                    progress.update(task, description=f"Buscando: {query}...")
+                    
+                    # Buscar videos
+                    candidates = yt_client.search_videos(query, max_results=10)
+                    
+                    # Filtrar y descargar transcripción
+                    for candidate in candidates:
+                        if len(videos_found) >= count:
+                            break
+                            
+                        # Verificar si ya lo tenemos
+                        if any(v.url == candidate.url for v in videos_found):
+                            continue
+                            
+                        progress.update(task, description=f"Analizando: {candidate.title[:30]}...")
+                        
+                        # Descargar transcripción completa
+                        full_video = yt_client.fetch_video(candidate.url)
+                        
+                        if full_video and full_video.transcript:
+                            # Guardar en cache
+                            pipeline.cache.store_scraped_content("youtube", [full_video.to_dict()])
+                            videos_found.append(full_video)
+                            progress.advance(task)
+                            console.print(f"[green]✓ Encontrado: {full_video.title[:50]}...[/green]")
+                    
+                    attempts += 1
+            
+            if videos_found:
+                console.print(f"\n[green]✓ {len(videos_found)} tendencias capturadas. Iniciando producción...[/green]\n")
+                
+                # Lista de URLs encontradas para filtrar
+                target_urls = [v.url for v in videos_found]
+                
+                # Ejecutar batch SOLO con lo que tenemos
+                pipeline.run_batch_pipeline(
+                    process_all_pending=True,
+                    skip_scrape=True,  # No volver a scrapear RSS/Reddit
+                    sources=["youtube"], # Solo enfocarse en youtube por seguridad
+                    prefer_video_bg=not args.image_bg,
+                    image_effect=args.effect,
+                    publish=not args.no_publish,
+                    publish_mode=args.publish_mode,
+                    filter_urls=target_urls # Solo procesar estos videos
+                )
+            else:
+                console.print("[yellow]No se encontraron tendencias válidas con transcripción[/yellow]")
+            return
+
         if args.pending:
             count = pipeline.get_pending_count()
             console.print(f"[cyan]Contenido pendiente en cache: {count} items[/cyan]")

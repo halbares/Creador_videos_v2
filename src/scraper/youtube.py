@@ -111,24 +111,110 @@ class YouTubeClient:
             logger.error(f"Error extrayendo info de {url}: {e}")
             return None
     
-    def _get_transcript(self, info: dict) -> Optional[str]:
-        """Obtiene la transcripción del video si está disponible."""
-        # Intentar obtener subtítulos automáticos o manuales
-        subtitles = info.get("subtitles", {})
-        automatic_captions = info.get("automatic_captions", {})
+    def _get_transcript(self, url: str) -> Optional[str]:
+        """
+        Descarga y parsea la transcripción del video.
+        Prioridad: Inglés (Manual) > Inglés (Auto) > Español (Manual) > Español (Auto).
+        """
+        import glob
+        import tempfile
+        import os
+        import time
+        import random
         
-        # Preferir español, luego inglés
-        for lang in ["es", "en"]:
-            subs = subtitles.get(lang) or automatic_captions.get(lang)
-            if subs:
-                # Obtener la primera opción disponible
-                for sub in subs:
-                    if sub.get("ext") in ["vtt", "srt", "json3"]:
-                        # Aquí se podría descargar y parsear el archivo
-                        # Por ahora retornamos indicador de disponibilidad
-                        return f"[Transcripción disponible en {lang}]"
+        # Pausa aleatoria para evitar 429 Too Many Requests
+        time.sleep(random.uniform(2.0, 5.0))
         
-        return None
+        try:
+            import yt_dlp
+            
+            # Crear directorio temporal único
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # Opciones para solo bajar subtítulos
+                ydl_opts = {
+                    'skip_download': True,
+                    'writesubtitles': True,
+                    'writeautomaticsub': True,
+                    'subtitleslangs': ['es', 'en'],
+                    'subtitlesformat': 'vtt',
+                    'outtmpl': f'{temp_dir}/%(id)s',
+                    'quiet': True,
+                    'no_warnings': True,
+                }
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([url])
+                
+                # Buscar archivos VTT generados
+                files = glob.glob(f"{temp_dir}/*.vtt")
+                if not files:
+                    return None
+                
+                # Seleccionar el mejor subtítulo
+                # Preferencia: español manual > español auto > inglés manual > inglés auto
+                selected_file = files[0]
+                
+                # Clasificar archivos
+                es_manual = [f for f in files if ".es.vtt" in f]
+                es_auto = [f for f in files if ".es-orig" in f or "es" in f] # a veces es.vtt es auto? yt-dlp suele usar lang.vtt
+                en_files = [f for f in files if ".en." in f]
+                
+                if es_manual:
+                    selected_file = es_manual[0]
+                elif es_auto:
+                    selected_file = es_auto[0]
+                elif en_files:
+                    selected_file = en_files[0]
+                
+                return self._clean_vtt(selected_file)
+                
+        except Exception as e:
+            logger.error(f"Error obteniendo transcripción de {url}: {e}")
+            return None
+
+    def _clean_vtt(self, file_path: str) -> str:
+        """Limpia el archivo VTT para obtener solo texto."""
+        text_lines = []
+        seen_lines = set()
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # Simple parsing línea por línea
+            lines = content.split('\n')
+            for line in lines:
+                line = line.strip()
+                
+                # Ignorar cabeceras y timestamps
+                if not line: continue
+                if line == 'WEBVTT': continue
+                if '-->' in line: continue
+                if line.lower().startswith('kind:'): continue
+                if line.lower().startswith('language:'): continue
+                
+                # Limpiar tags de estilo como <c.color>...</c> o <b>...</b>
+                # Simplemente quitamos todo lo que parezca tag HTML
+                import re
+                line = re.sub(r'<[^>]+>', '', line)
+                
+                # Ignorar duplicados consecutivos (común en captions rolldown)
+                if line in seen_lines:
+                    continue
+                
+                # A veces los subtítulos automáticos repiten frases, 
+                # tratamos de filtrar frases muy cortas repetidas
+                if len(line) < 3:
+                    continue
+                    
+                text_lines.append(line)
+                seen_lines.add(line)
+            
+            return " ".join(text_lines)
+            
+        except Exception as e:
+            logger.error(f"Error limpiando VTT {file_path}: {e}")
+            return ""
     
     def fetch_video(self, url: str) -> Optional[YouTubeVideo]:
         """
@@ -140,14 +226,16 @@ class YouTubeClient:
         Returns:
             YouTubeVideo o None si hay error
         """
-        # Verificar cache
-        if self.cache.is_content_seen(url):
-            logger.debug(f"Video ya visto: {url}")
-            return None
+        # Verificar cache (si ya fue procesado)
+        # Nota: Permitimos re-procesar si el usuario lo pide explícitamente vía URL,
+        # pero la Pipeline lo chequeará. Aquí solo descargamos.
         
         info = self._extract_info(url)
         if not info:
             return None
+            
+        # Intentar obtener transcripción real
+        transcript_text = self._get_transcript(url)
         
         video = YouTubeVideo(
             title=info.get("title", ""),
@@ -157,7 +245,7 @@ class YouTubeClient:
             duration=self._parse_duration(info.get("duration")),
             view_count=info.get("view_count", 0),
             upload_date=self._parse_date(info.get("upload_date")),
-            transcript=self._get_transcript(info)
+            transcript=transcript_text or "[No transcription available]"
         )
         
         return video
@@ -180,7 +268,7 @@ class YouTubeClient:
             
             search_opts = {
                 **self._ydl_opts,
-                "extract_flat": True,
+                "extract_flat": False,  # Changed to False for better reliability
                 "default_search": f"ytsearch{max_results}",
             }
             
@@ -190,8 +278,21 @@ class YouTubeClient:
                 videos = []
                 entries = results.get("entries", [])
                 
+                # Obtener lista negra de keywords
+                blacklist = self.config.get("blacklisted_keywords", [])
+                blacklist = [w.lower() for w in blacklist]
+                
                 for entry in entries:
                     if not entry:
+                        continue
+                    
+                    title = entry.get("title", "")
+                    description = entry.get("description", "")
+                    
+                    # Filtro ANTI-GYM: Verificar blacklist
+                    text_to_check = (title + " " + description).lower()
+                    if any(bad_word in text_to_check for bad_word in blacklist):
+                        logger.info(f"Video descartado (filtro anti-gym): {title}")
                         continue
                     
                     url = entry.get("url") or f"https://youtube.com/watch?v={entry.get('id')}"

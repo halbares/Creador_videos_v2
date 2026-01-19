@@ -2,60 +2,102 @@
 # Formato: lista de URLs/identificadores por tipo
 
 rss:
-  # Feeds de salud y bienestar
+  # Feeds de salud y bienestar (Enfoque Mental/Espiritual)
   feeds:
-    - url: "https://www.healthline.com/rss/nutrition"
-      category: "nutrition"
+    - url: "https://www.psychologytoday.com/us/feed"
+      category: "mental_health"
     - url: "https://www.mindbodygreen.com/rss"
       category: "wellness"
     - url: "https://feeds.feedburner.com/zenhabits"
       category: "habits"
+    - url: "https://tinybuddha.com/feed/"
+      category: "mindfulness"
   
-  # Filtros
+  # Filtros RSS
   keywords:
     include:
-      - health
-      - wellness
-      - nutrition
-      - sleep
-      - exercise
       - mental health
       - habits
       - mindfulness
+      - anxiety
+      - meditation
+      - psychology
+      - happiness
+      - stoicism
     exclude:
       - advertisement
       - sponsored
+      - politics
+      - workout
+      - weight loss
+      - muscle
 
 reddit:
   # Subreddits a monitorear
   subreddits:
-    - name: "HealthyFood"
-      limit: 10
-    - name: "GetMotivated"
-      limit: 10
-    - name: "Fitness"
-      limit: 10
-    - name: "Sleep"
-      limit: 5
     - name: "Meditation"
+      limit: 10
+    - name: "Mindfulness"
+      limit: 10
+    - name: "Stoicism"
+      limit: 10
+    - name: "Anxiety"
+      limit: 5
+    - name: "DecidingToBeBetter"
+      limit: 5
+    - name: "Psychology"
       limit: 5
   
   # Configuración
-  sort: "hot"  # hot, new, top
-  time_filter: "week"  # hour, day, week, month, year, all
+  sort: "top"
+  time_filter: "week"
 
 youtube:
-  # Canales a monitorear
-  channels:
-    - id: "UCNjPtOCvMrKY5eLwr_-7eUg"  # Ejemplo
-      name: "Health Channel"
-  
-  # Búsquedas
+  # Búsquedas de TENDENCIAS (Inglés) - ENFOQUE MENTAL/ESPIRITUAL PURO
   searches:
-    - query: "healthy habits short"
+    - query: "stoic mindset for tough times"
       max_results: 5
-    - query: "nutrition tips"
+    - query: "letting go meditation viral"
       max_results: 5
+    - query: "psychology of happiness viral"
+      max_results: 5
+    - query: "overcoming anxiety without meds"
+      max_results: 5
+    - query: "quiet mind practice"
+      max_results: 5
+    - query: "monk mode habits motivation"
+      max_results: 5
+    - query: "emotional intelligence tricks"
+      max_results: 5
+    - query: "how to stop overthinking viral"
+      max_results: 5
+    - query: "morning routine for mental health"
+      max_results: 5
+    - query: "anti-inflammatory foods 2026 trends"
+      max_results: 5
+    - query: "healing properties of spices and herbs"
+      max_results: 5
+    - query: "foods for brain health and focus"
+      max_results: 5
+    - query: "ancient superfoods for longevity"
+      max_results: 5
+    - query: "natural remedies in common foods"
+      max_results: 5
+
+  # Palabras clave PROHIBIDAS (Filtro Anti-Gym)
+  blacklisted_keywords:
+    - gym
+    - workout
+    - fitness
+    - muscle
+    - abs
+    - weight loss
+    - diet
+    - protein
+    - bodybuilding
+    - crossfit
+    - fat burn
+    - calorie
 
 blogs:
   # URLs de blogs específicos
@@ -70,4 +112,4 @@ limits:
   max_items_per_source: 10
   cache_ttl_hours: 24
   min_content_length: 100
-  max_content_length: 5000
+  max_content_length: 10000

@@ -462,6 +462,75 @@ menu_publish() {
     read -p "Presiona Enter para continuar..."
 }
 
+# Menú de pipeline directo desde YouTube
+menu_youtube_direct() {
+    show_banner
+    echo -e "${GREEN}🚀 PIPELINE DESDE YOUTUBE${NC}"
+    echo ""
+    echo -e "${CYAN}Ingresa las URLs de YouTube separadas por espacio:${NC}"
+    echo -e "${WHITE}(Ej: https://youtu.be/... https://youtu.be/...)${NC}"
+    echo ""
+    read -p "> " urls
+    
+    if [ -z "$urls" ]; then
+        echo -e "${RED}No ingresaste ninguna URL${NC}"
+        return
+    fi
+    
+    echo ""
+    echo -e "${YELLOW}Se procesarán los siguientes videos:${NC}"
+    for url in $urls; do
+        echo "  - $url"
+    done
+    echo ""
+    echo -e "${YELLOW}Este proceso incluye:${NC}"
+    echo "  1. Descargar transcripción"
+    echo "  2. Generar guión adaptado"
+    echo "  3. Generar audio y video"
+    echo ""
+    read -p "¿Continuar? (s/n): " confirm
+    
+    if [[ "$confirm" =~ ^[Ss]$ ]]; then
+        # Nota: pasamos las URLs sin comillas para que bash las expanda como argumentos separados
+        activate_venv && python -m src.pipeline --youtube-urls $urls
+    fi
+    
+    read -p "Presiona Enter para continuar..."
+}
+
+# Menú de cazador de tendencias
+menu_trend_hunter() {
+    show_banner
+    echo -e "${GREEN}🚀 CAZADOR DE TENDENCIAS (TREND HUNTER)${NC}"
+    echo ""
+    echo -e "${CYAN}Este modo buscará videos virales en INGLÉS sobre:${NC}"
+    echo -e "  • Mental Health & Hacks"
+    echo -e "  • Mindfulness & Meditation"
+    echo -e "  • Anxiety Relief"
+    echo -e "  • Superfoods & Gut Health"
+    echo ""
+    echo -e "${YELLOW}El sistema:${NC}"
+    echo "  1. Buscará videos trending"
+    echo "  2. Descargará la transcripción (Inglés)"
+    echo "  3. Adaptará el contenido a Español (Estilo propio)"
+    echo "  4. Generará el video completo"
+    echo ""
+    read -p "¿Cuántos videos quieres generar? (1-10): " count
+    
+    if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -ge 1 ] && [ "$count" -le 10 ]; then
+        echo ""
+        read -p "¿Comenzar la cacería? (s/n): " confirm
+        
+        if [[ "$confirm" =~ ^[Ss]$ ]]; then
+            activate_venv && python -m src.pipeline --trend-hunter "$count"
+        fi
+    else
+        echo -e "${RED}Número inválido${NC}"
+    fi
+    
+    read -p "Presiona Enter para continuar..."
+}
+
 # Menú principal
 main_menu() {
     while true; do
@@ -475,10 +544,11 @@ main_menu() {
         echo -e "  ${CYAN}3.${NC} 🔊 Generar audio (XTTS)"
         echo -e "  ${CYAN}4.${NC} 🎬 Renderizar video (FFmpeg)"
         echo -e "  ${GREEN}5.${NC} 🚀 Pipeline completo (automático)"
-        echo -e "  ${WHITE}6.${NC} 📂 Ver videos generados"
+        echo -e "  ${GREEN}6.${NC} 🌍 Cazar Tendencias (Inglés → Español)"
+        echo -e "  ${WHITE}7.${NC} 📂 Ver videos generados"
         echo -e "  ${PURPLE}9.${NC} 📤 Publicar video"
-        echo -e "  ${WHITE}7.${NC} ⚙️  Configuración"
-        echo -e "  ${WHITE}8.${NC} 🧹 Limpiar archivos temporales"
+        echo -e "  ${WHITE}8.${NC} ⚙️  Configuración"
+        echo -e "  ${WHITE}10.${NC} 🧹 Limpiar archivos temporales"
         echo -e "  ${RED}0.${NC} ❌ Salir"
         echo ""
         read -p "Selecciona una opción: " choice
@@ -489,15 +559,16 @@ main_menu() {
             3) menu_audio ;;
             4) menu_video ;;
             5) run_pipeline ;;
-            6) 
+            6) menu_trend_hunter ;;
+            7) 
                 echo ""
                 echo -e "${CYAN}Videos generados:${NC}"
                 ls -lah output/*.mp4 2>/dev/null || echo "No hay videos generados"
                 read -p "Presiona Enter para continuar..."
                 ;;
-            7) menu_config ;;
-            8) clean_temp ;;
+            8) menu_config ;;
             9) menu_publish ;;
+            10) clean_temp ;;
             0) 
                 echo -e "${GREEN}¡Hasta luego!${NC}"
                 exit 0
