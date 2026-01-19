@@ -174,13 +174,32 @@ class CloudUploader:
             logger.error("No se obtuvo URL")
             return None
         
-        # Convertir URL de vista a URL de descarga directa
+        # Convertir URL de vista a URL de descarga directa según el servicio
+        
+        # Google Drive: 
         # De: https://drive.google.com/open?id=FILE_ID
-        # A:  https://drive.google.com/uc?id=FILE_ID&export=download
+        # A:  https://drive.google.com/uc?id=FILE_ID&export=download&confirm=t
         if "drive.google.com/open?id=" in url:
             file_id = url.split("id=")[-1]
-            url = f"https://drive.google.com/uc?id={file_id}&export=download"
-            logger.info(f"URL convertida a descarga directa: {url}")
+            url = f"https://drive.google.com/uc?id={file_id}&export=download&confirm=t"
+            logger.info(f"URL Google Drive convertida: {url}")
+        
+        # Dropbox:
+        # De: https://www.dropbox.com/...?rlkey=xxx&dl=0
+        # A:  https://www.dropbox.com/...?rlkey=xxx&raw=1
+        elif "dropbox.com" in url:
+            # Reemplazar dl=0 o dl=1 con raw=1 (funciona tanto con ? como con &)
+            if "&dl=0" in url:
+                url = url.replace("&dl=0", "&raw=1")
+            elif "&dl=1" in url:
+                url = url.replace("&dl=1", "&raw=1")
+            elif "?dl=0" in url:
+                url = url.replace("?dl=0", "?raw=1")
+            elif "?dl=1" in url:
+                url = url.replace("?dl=1", "?raw=1")
+            else:
+                url = url + "&raw=1"
+            logger.info(f"URL Dropbox convertida: {url}")
         
         logger.info(f"Enlace público: {url}")
         return url
