@@ -1,7 +1,7 @@
 [project]
-name = "creador-videos-virales"
-version = "1.0.0"
-description = "Sistema automatizado para crear videos cortos virales sobre vida saludable"
+name = "creador-videos-v3"
+version = "3.0.0"
+description = "Motor de generación de videos V3 con Sincronización de Audio (Whisper) y Arquitectura de Escenas."
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
@@ -10,41 +10,33 @@ authors = [
 ]
 
 dependencies = [
-    # TTS - XTTS v2
-    "TTS>=0.22.0",
+    # Core AI & Audio
+    "openai-whisper>=20231117",  # Sincronización precisa
+    "torch>=2.0.0",              # Backend para Whisper
     
-    # LLM - OpenRouter (compatible OpenAI)
-    "openai>=1.0.0",
+    # Architecture & Data
+    "pydantic>=2.0.0",           # Validación de datos estricta
+    "python-dotenv>=1.0.0",      # Configuración
     
-    # Scraping
-    "feedparser>=6.0.0",
-    "praw>=7.7.0",
-    "yt-dlp>=2024.0.0",
-    "beautifulsoup4>=4.12.0",
-    "httpx>=0.27.0",
+    # CLI & UI
+    "rich>=13.0.0",              # Interfaz bonita
+    "typer>=0.9.0",              # CLI moderno
     
-    # Video/Audio
-    "pydub>=0.25.0",
+    # Infrastructure
+    "httpx>=0.27.0",             # Cliente HTTP moderno
+    "tenacity>=8.2.0",           # Reintentos robustos
     
-    # Utils
-    "pyyaml>=6.0",
-    "tenacity>=8.2.0",
-    "diskcache>=5.6.0",
-    "python-dotenv>=1.0.0",
-    "rich>=13.0.0",
-    
-    # Pexels API
-    "requests>=2.31.0",
+    # Video Processing (Future Phase 3)
+    # Video Processing
+    "moviepy>=1.0.3",   
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
     "ruff>=0.3.0",
+    "black>=24.0.0",
 ]
-
-[project.scripts]
-creador = "src.main:main"
 
 [build-system]
 requires = ["hatchling"]
@@ -56,7 +48,3 @@ packages = ["src"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "W"]
-ignore = ["E501"]

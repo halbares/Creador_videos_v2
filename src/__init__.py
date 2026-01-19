@@ -1,6 +1,3 @@
 """
-Creador de Videos Virales
-Sistema automatizado para crear videos cortos sobre vida saludable
+Creador de Videos V3 - Source Root
 """
-
-__version__ = "1.0.0"
