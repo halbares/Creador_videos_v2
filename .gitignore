@@ -30,6 +30,9 @@ logs/
 assets/*.mp4
 assets/*.jpg
 assets/*.png
+legacy/assets/*.mp4
+legacy/assets/*.jpg
+legacy/assets/*.png
 
 # NodeJS & Mindfulness Tests
 node_modules/
