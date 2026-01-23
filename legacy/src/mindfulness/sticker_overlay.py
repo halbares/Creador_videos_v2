@@ -82,9 +82,10 @@ class StickerOverlay:
                 
                 # Paso 2: Edgedetect sobre RGB (fondo transparente se ve negro en edgedetect usualmente)
                 # Usamos background negro explícito para mejorar detección
+                # NOTA: split crea s_rgb y s_alpha. drawbox consume s_rgb, overlay usa s_alpha
                 s_edge = (
                     f"[s_rgb{i}]drawbox=t=fill:c=black@1[s_blackbg{i}];"  
-                    f"[s_blackbg{i}][s_rgb{i}]overlay[s_flat{i}];"
+                    f"[s_blackbg{i}][s_alpha{i}]overlay[s_flat{i}];"
                     f"[s_flat{i}]edgedetect=low=0.1:high=0.4,colorkey=black:0.1:0.1[s_edges{i}];"
                 )
                 filter_parts.append(s_edge)
