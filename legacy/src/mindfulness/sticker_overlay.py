@@ -76,16 +76,16 @@ class StickerOverlay:
                 # Si el input tiene alpha, lo perdemos parcialmente o debemos usarlo.
                 # Asumimos que stickers de Pexels/rembg tienen alpha transparente.
                 
-                # Paso 1: Escalar y preparar
-                s_prep = f"[{sticker_idx}:v]scale={self.STICKER_WIDTH}:-1,format=rgba,split[s_rgb][s_alpha];"
+                # Paso 1: Escalar y preparar (nombres únicos con índice i)
+                s_prep = f"[{sticker_idx}:v]scale={self.STICKER_WIDTH}:-1,format=rgba,split[s_rgb{i}][s_alpha{i}];"
                 filter_parts.append(s_prep)
                 
                 # Paso 2: Edgedetect sobre RGB (fondo transparente se ve negro en edgedetect usualmente)
                 # Usamos background negro explícito para mejorar detección
                 s_edge = (
-                    f"[s_rgb]drawbox=t=fill:c=black@1[s_blackbg];"  
-                    f"[s_blackbg][s_rgb]overlay[s_flat];"
-                    f"[s_flat]edgedetect=low=0.1:high=0.4,colorkey=black:0.1:0.1[s_edges];"
+                    f"[s_rgb{i}]drawbox=t=fill:c=black@1[s_blackbg{i}];"  
+                    f"[s_blackbg{i}][s_rgb{i}]overlay[s_flat{i}];"
+                    f"[s_flat{i}]edgedetect=low=0.1:high=0.4,colorkey=black:0.1:0.1[s_edges{i}];"
                 )
                 filter_parts.append(s_edge)
 
@@ -96,7 +96,7 @@ class StickerOverlay:
                 # El resultado de edgedetect son lineas blancas sobre transparente (por colorkey)
                 # Eso es perfecto. White Neon.
                 # Si quisieramos color, podriamos usar colorchannelmixer, pero White es elegante.
-                filter_parts.append(f"[s_edges]null[{sticker_out}];")
+                filter_parts.append(f"[s_edges{i}]null[{sticker_out}];")
 
             else:
                 # Estilo clásico (Float)
