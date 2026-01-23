@@ -153,7 +153,8 @@ class FFmpegAssembler:
         stickers: List[dict],
         audio_path: str,
         subtitles_path: str,
-        output_path: str
+        output_path: str,
+        animation: str = "float"
     ) -> bool:
         """
         Ensambla video final con p5 base + stickers animados + subtítulos.
@@ -164,6 +165,7 @@ class FFmpegAssembler:
             audio_path: Ruta al audio
             subtitles_path: Ruta a subtítulos ASS
             output_path: Ruta de salida
+            animation: Estilo de animación ("float", "neon_contour")
             
         Returns:
             True si exitoso
@@ -174,7 +176,7 @@ class FFmpegAssembler:
         sticker_inputs, filter_complex = overlay.build_complete_filter(
             stickers, 
             subtitles_path,
-            animation="float"
+            animation=animation
         )
         
         # Construir comando

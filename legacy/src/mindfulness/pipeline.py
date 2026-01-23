@@ -124,7 +124,8 @@ class MindfulnessPipeline:
             stickers,
             audio_res['audio_path'], 
             subs_file, 
-            output_path
+            output_path,
+            animation="neon_contour" # Nuevo estilo por defecto
         )
         
         if success:

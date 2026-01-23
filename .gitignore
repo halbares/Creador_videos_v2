@@ -30,3 +30,12 @@ logs/
 assets/*.mp4
 assets/*.jpg
 assets/*.png
+
+# NodeJS & Mindfulness Tests
+node_modules/
+**/node_modules/
+legacy/src/mindfulness/visible_test/
+legacy/src/mindfulness/test_blob/
+legacy/src/mindfulness/test_frames*/
+legacy/src/mindfulness/p5_frames/
+

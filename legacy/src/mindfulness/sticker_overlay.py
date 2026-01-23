@@ -27,14 +27,16 @@ class StickerOverlay:
     def generate_overlay_filter(
         self,
         stickers: list[dict],
-        animation: str = "float"
+        animation: str = "float",
+        mood_color: str = "#ffffff"
     ) -> tuple[list[str], str]:
         """
         Genera el filtro FFmpeg para overlay de múltiples stickers.
         
         Args:
             stickers: Lista de dicts con path, start, end
-            animation: Tipo de animación (float, zoom_pulse, static)
+            animation: Tipo ("float", "neon_contour")
+            mood_color: Color hex para el efecto neon
             
         Returns:
             Tuple de (lista de inputs adicionales, string del filter_complex)
@@ -42,11 +44,14 @@ class StickerOverlay:
         if not stickers:
             return [], ""
         
+        # Mapa de colores para Neon
+        # Convertir hex simple a expresión de FFmpeg
+        # Esto es complejo en FFmpeg puro sin filtros complejos
+        # Usaremos "colorize" o "colorchannelmixer" para teñir el blanco
+        
         inputs = []
         filter_parts = []
         
-        # El video base es input 0
-        # Cada sticker es input 1, 2, 3...
         last_stream = "[0:v]"
         
         for i, sticker in enumerate(stickers):
@@ -58,18 +63,52 @@ class StickerOverlay:
                 continue
             
             inputs.extend(["-i", path])
-            sticker_idx = i + 1  # +1 porque video base es 0
+            sticker_idx = i + 1
             
-            # Escalar sticker
-            scale_filter = f"[{sticker_idx}:v]scale={self.STICKER_WIDTH}:-1,format=rgba[sticker{i}];"
-            filter_parts.append(scale_filter)
+            if animation == "neon_contour":
+                # Cadena de filtros para Neon Zen
+                # 1. Escalar
+                # 2. Edgedetect (detecta bordes, fondo negro)
+                # 3. Colorkey (quita el negro)
+                # 4. Colorize (tiñe) - Simplificado: Usamos split y tint
+                
+                # Nota: edgedetect funciona sobre RGB.
+                # Si el input tiene alpha, lo perdemos parcialmente o debemos usarlo.
+                # Asumimos que stickers de Pexels/rembg tienen alpha transparente.
+                
+                # Paso 1: Escalar y preparar
+                s_prep = f"[{sticker_idx}:v]scale={self.STICKER_WIDTH}:-1,format=rgba,split[s_rgb][s_alpha];"
+                filter_parts.append(s_prep)
+                
+                # Paso 2: Edgedetect sobre RGB (fondo transparente se ve negro en edgedetect usualmente)
+                # Usamos background negro explícito para mejorar detección
+                s_edge = (
+                    f"[s_rgb]drawbox=t=fill:c=black@1[s_blackbg];"  
+                    f"[s_blackbg][s_rgb]overlay[s_flat];"
+                    f"[s_flat]edgedetect=low=0.1:high=0.4,colorkey=black:0.1:0.1[s_edges];"
+                )
+                filter_parts.append(s_edge)
+
+                # Nombre del stream final del sticker
+                sticker_out = f"sticker_processed{i}"
+                
+                # Paso 3: Combinar edges y usarlo
+                # El resultado de edgedetect son lineas blancas sobre transparente (por colorkey)
+                # Eso es perfecto. White Neon.
+                # Si quisieramos color, podriamos usar colorchannelmixer, pero White es elegante.
+                filter_parts.append(f"[s_edges]null[{sticker_out}];")
+
+            else:
+                # Estilo clásico (Float)
+                filter_parts.append(f"[{sticker_idx}:v]scale={self.STICKER_WIDTH}:-1,format=rgba[sticker_processed{i}];")
+                sticker_out = f"sticker_processed{i}"
             
-            # Generar expresión de posición con animación
+            # Generar expresión de posición y movimiento
             x_pos, y_pos = self._get_animated_position(animation)
             
-            # Overlay con enable para timing
+            # Overlay final
             overlay_filter = (
-                f"{last_stream}[sticker{i}]overlay="
+                f"{last_stream}[{sticker_out}]overlay="
                 f"x='{x_pos}':"
                 f"y='{y_pos}':"
                 f"enable='between(t,{start},{end})'[v{i}];"
@@ -77,12 +116,8 @@ class StickerOverlay:
             filter_parts.append(overlay_filter)
             last_stream = f"[v{i}]"
         
-        # Remover último punto y coma
         if filter_parts:
             filter_parts[-1] = filter_parts[-1].rstrip(";")
-        
-        # El stream final necesita un nombre para mapeo
-        if filter_parts:
             filter_parts[-1] = filter_parts[-1].replace(f"[v{len(stickers)-1}]", "[stickered]")
         
         filter_string = "".join(filter_parts)
@@ -91,39 +126,31 @@ class StickerOverlay:
     def _get_animated_position(self, animation: str) -> tuple[str, str]:
         """
         Genera expresiones FFmpeg para posición animada.
-        
-        Args:
-            animation: Tipo de animación
-            
-        Returns:
-            Tuple de (x_expression, y_expression)
         """
-        # Centro horizontal
+        # Centro
         x_center = f"(W-w)/2"
-        
-        # Centro vertical (ajustado para no tapar subtítulos)
-        y_center = str(self.STICKER_Y_CENTER)
+        y_center = f"(H-h)/2" # Centrado puro para focus
         
         if animation == "float":
-            # Movimiento vertical suave (seno)
-            # Amplitud: 20 píxeles, frecuencia: 0.5 Hz
-            y_expr = f"{y_center}+20*sin(t*3.14)"
+            # Movimiento relajado original
+            y_expr = f"{self.STICKER_Y_CENTER}+20*sin(t*3.14)"
             return x_center, y_expr
         
-        elif animation == "zoom_pulse":
-            # Para zoom necesitamos modificar scale, no posición
-            # Por ahora usamos float como fallback
-            y_expr = f"{y_center}+15*sin(t*2)"
-            return x_center, y_expr
-        
-        elif animation == "gentle_rotate":
-            # Rotación requiere filtro rotate separado
-            # Por ahora usamos float
-            y_expr = f"{y_center}+10*sin(t*2.5)"
-            return x_center, y_expr
-        
-        else:  # static
-            return x_center, y_center
+        elif animation == "neon_contour":
+            # Movimiento "Psychological Float" (Respiración en 2 ejes)
+            # X: Oscilación lenta (periodo 6s)
+            # Y: Oscilación más lenta (periodo 8s)
+            # + Zoom sutil simulado con escala si fuera posible, pero aqui es pos
+            
+            x_expr = f"{x_center}+15*sin(t*1.0)"
+            y_expr = f"{self.STICKER_Y_CENTER}+20*cos(t*0.8)" 
+            # Nota: Usamos STICKER_Y_CENTER para mantener consistencia con subtitulos,
+            # pero el usuario pidio 'centrado'. El centro real es H/2 = 960 (en 1080x1920)
+            # STICKER_Y_CENTER es 750.
+            # Para 'neon_contour' usaremos 850, un poco mas abajo, mas centrado.
+            y_expr = f"850+20*cos(t*0.8)" 
+            
+            return x_expr, y_expr
     
     def build_complete_filter(
         self,

@@ -758,12 +758,20 @@ Usa estos hooks para versiones del video o para probar engagement:
         ))
         
         try:
-            # Paso 1: Scraping (opcional)
+            # Paso 1: Scraping (solo si es necesario)
             if not skip_scrape:
-                content = self.step_scrape(sources)
-                
-                if not content:
-                    console.print("[yellow]No se obtuvo contenido nuevo. Usando cache...[/yellow]")
+                # Verificar si ya hay contenido pendiente en cache
+                pending = self.cache.get_pending_content()
+                if pending:
+                    console.print(f"[green]Encontrados {len(pending)} items pendientes en cache.[/green]")
+                    console.print("[dim]Saltando scraping para priorizar contenido existente.[/dim]")
+                    content = [] # Force using cache
+                else:
+                    console.print("[yellow]No hay contenido pendiente. Iniciando scraping...[/yellow]")
+                    content = self.step_scrape(sources)
+                    
+                    if not content:
+                        console.print("[yellow]No se obtuvo contenido nuevo. Usando cache...[/yellow]")
             
             # Paso 2: Generar guión
             script = self.step_generate_script(from_cache=True)
@@ -894,10 +902,17 @@ Usa estos hooks para versiones del video o para probar engagement:
             title="Creador de Videos Virales"
         ))
         
-        # Paso 1: Scraping (solo una vez)
+        # Paso 1: Scraping (solo si es necesario)
         if not skip_scrape:
-            console.print("\n[bold cyan]Fase 1: Obteniendo contenido...[/bold cyan]")
-            self.step_scrape(sources)
+            # Verificar cache antes de scrapear
+            pending = self.cache.get_pending_content()
+            needed = count if not process_all_pending else 1
+            
+            if len(pending) >= needed and not filter_urls:
+                console.print(f"\n[green]Fase 1: Encontrados {len(pending)} items en cache. Saltando scraping.[/green]")
+            else:
+                console.print(f"\n[bold cyan]Fase 1: Obteniendo contenido (Cache: {len(pending)})...[/bold cyan]")
+                self.step_scrape(sources)
         else:
             console.print("\n[dim]Fase 1: Scraping omitido (usando contenido cazado)[/dim]")
         
