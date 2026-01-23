@@ -38,8 +38,8 @@ show_banner() {
 # Función para verificar entorno virtual
 check_venv() {
     if [ ! -d ".venv" ]; then
-        echo -e "${YELLOW}⚠ Entorno virtual no encontrado. Creando...${NC}"
-        uv venv
+        echo -e "${YELLOW}⚠ Entorno virtual no encontrado. Creando con Python 3.10 (Legacy)...${NC}"
+        uv venv --python 3.10
         uv sync
         echo -e "${GREEN}✓ Entorno virtual creado${NC}"
     fi
@@ -545,7 +545,8 @@ main_menu() {
         echo -e "  ${CYAN}4.${NC} 🎬 Renderizar video (FFmpeg)"
         echo -e "  ${GREEN}5.${NC} 🚀 Pipeline completo (automático)"
         echo -e "  ${GREEN}6.${NC} 🌍 Cazar Tendencias (Inglés → Español)"
-        echo -e "  ${WHITE}7.${NC} 📂 Ver videos generados"
+        echo -e "  ${PURPLE}7.${NC} 🧘 Generar Video Mindfulness (p5.js + Pexels)"
+        echo -e "  ${WHITE}8.${NC} 📂 Ver videos generados"
         echo -e "  ${PURPLE}9.${NC} 📤 Publicar video"
         echo -e "  ${WHITE}8.${NC} ⚙️  Configuración"
         echo -e "  ${WHITE}10.${NC} 🧹 Limpiar archivos temporales"
@@ -561,6 +562,21 @@ main_menu() {
             5) run_pipeline ;;
             6) menu_trend_hunter ;;
             7) 
+                echo ""
+                echo -e "${PURPLE}🧘 GENERADOR MINDFULNESS${NC}"
+                echo ""
+                read -p "¿Cuántos videos quieres generar? (1-10): " count
+                
+                if [[ "$count" =~ ^[0-9]+$ ]] && [ "$count" -ge 1 ] && [ "$count" -le 10 ]; then
+                    activate_venv && python -m src.mindfulness.pipeline --count "$count"
+                else
+                    echo -e "${RED}Cantidad inválida. Generando 1 por defecto.${NC}"
+                    activate_venv && python -m src.mindfulness.pipeline --count 1
+                fi
+                
+                read -p "Presiona Enter para continuar..."
+                ;;
+            8) 
                 echo ""
                 echo -e "${CYAN}Videos generados:${NC}"
                 ls -lah output/*.mp4 2>/dev/null || echo "No hay videos generados"

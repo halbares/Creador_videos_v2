@@ -4,14 +4,23 @@
 rss:
   # Feeds de salud y bienestar (Enfoque Mental/Espiritual)
   feeds:
-    - url: "https://www.psychologytoday.com/us/feed"
-      category: "mental_health"
-    - url: "https://www.mindbodygreen.com/rss"
-      category: "wellness"
+    # WORKING FEEDS
     - url: "https://feeds.feedburner.com/zenhabits"
       category: "habits"
     - url: "https://tinybuddha.com/feed/"
       category: "mindfulness"
+    - url: "https://www.lifehack.org/feed"
+      category: "productivity"
+    - url: "https://www.pickthebrain.com/feed/"
+      category: "self_improvement"
+    - url: "https://dailystoic.com/feed/"
+      category: "stoicism"
+    - url: "https://www.becomingminimalist.com/feed/"
+      category: "minimalism"
+    - url: "https://feeds.feedburner.com/marcandangel"
+      category: "happiness"
+    - url: "https://www.positivityblog.com/feed/"
+      category: "positivity"
   
   # Filtros RSS
   keywords:

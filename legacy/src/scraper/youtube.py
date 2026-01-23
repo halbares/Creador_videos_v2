@@ -142,9 +142,16 @@ class YouTubeClient:
                     'no_warnings': True,
                 }
                 
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
-                
+                try:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ydl.download([url])
+                except Exception as e:
+                    if "429" in str(e) or "Too Many Requests" in str(e):
+                        logger.warning(f"YouTube 429 (Rate Limit) en {url}. Abortando descarga para este video.")
+                        return None # Fail fast
+                    else:
+                        raise e
+
                 # Buscar archivos VTT generados
                 files = glob.glob(f"{temp_dir}/*.vtt")
                 if not files:

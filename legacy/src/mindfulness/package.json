@@ -1,0 +1,13 @@
+{
+    "name": "mindfulness-renderer",
+    "version": "1.0.0",
+    "description": "Headless p5.js renderer for video generation",
+    "main": "render_p5.js",
+    "dependencies": {
+        "canvas": "^3.2.1",
+        "canvas-sketch": "^0.7.5",
+        "canvas-sketch-util": "^1.10.0",
+        "jsdom": "^23.2.0",
+        "p5": "^1.11.11"
+    }
+}

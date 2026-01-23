@@ -162,16 +162,21 @@ class VideoPipeline:
 💬 Cuéntame en los comentarios: ¿qué tema te gustaría ver?"""
         
         # Generar hashtags (máximo 30 para Instagram, 5 principales para TikTok)
+        # SIEMPRE incluir estos hashtags base primero
         base_hashtags = [
-            "bienestar", "saludable", "vidaSana", "wellness", "salud",
-            "habitosSaludables", "motivacion", "crecimientoPersonal",
-            "mindfulness", "autocuidado", "tips", "consejosdevida"
+            "salud", "bienestar", "vidasaludable", "meditacion",
+            "mindfulness", "autocuidado", "habitossaludables", 
+            "motivacion", "crecimientopersonal", "wellness"
         ]
         
-        # Agregar keywords del script como hashtags
-        keyword_hashtags = [kw.replace(" ", "").replace("-", "") for kw in keywords[:5]]
+        # Agregar keywords del script como hashtags (limpiar espacios y guiones)
+        keyword_hashtags = [
+            kw.lower().replace(" ", "").replace("-", "").replace("á", "a").replace("é", "e").replace("í", "i").replace("ó", "o").replace("ú", "u")
+            for kw in keywords[:8]
+        ]
         
-        all_hashtags = keyword_hashtags + base_hashtags
+        # Base primero, luego keywords
+        all_hashtags = base_hashtags + keyword_hashtags
         # Limitar a 20 hashtags únicos
         unique_hashtags = list(dict.fromkeys(all_hashtags))[:20]
         

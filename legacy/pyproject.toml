@@ -35,6 +35,10 @@ dependencies = [
     
     # Pexels API
     "requests>=2.31.0",
+    
+    # Sticker Processing (background removal)
+    "rembg>=2.0.0",
+    "Pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]
