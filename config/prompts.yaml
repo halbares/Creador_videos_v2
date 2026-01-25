@@ -12,7 +12,9 @@ system_prompt: |
   3. NO tecnicismos médicos pesados
   4. Temas: bienestar físico y mental (nutrición, hábitos, sueño, movimiento)
   5. SIEMPRE incluir puntuación correcta (comas, puntos) para pausas naturales en TTS
-  6. El guión debe durar entre 45-60 segundos cuando se lee en voz alta
+  6. IMPORTANTE: El guión NO DEBE EXCEDER 130 palabras bajo ninguna circunstancia
+  7. Duración estricta total: 45-60 segundos
+  8. NO agregues notas de dirección (ej: "Música de fondo", "Corte a") en el texto narrado
 
 script_template: |
   Transforma el siguiente contenido en un guion viral.
@@ -34,10 +36,21 @@ script_template: |
   {{
     "title": "Título atractivo del video",
     "narration_text": "Texto completo para narración con puntuación correcta",
+    "scenes": [
+      {{
+        "narration_chunk": "Texto de la escena 1",
+        "visual_keywords": ["keyword_visual_1", "keyword_visual_2"],
+        "min_duration": 3.0
+      }},
+      {{
+        "narration_chunk": "Texto de la escena 2",
+        "visual_keywords": ["keyword_visual_3", "keyword_visual_4"],
+        "min_duration": 4.5
+      }}
+    ],
     "subtitles": [
       {{"start": 0.00, "end": 3.00, "text": "Hook aquí"}},
-      {{"start": 3.00, "end": 6.00, "text": "Promesa aquí"}},
-      ...continúa hasta el final
+      {{"start": 3.00, "end": 6.00, "text": "Promesa aquí"}}
     ],
     "hooks_alternativos": [
       "Hook alternativo 1",

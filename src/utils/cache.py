@@ -123,6 +123,10 @@ class ContentCache:
         
         return len(new_items)
     
+    def get_pending_count(self, source: Optional[str] = None) -> int:
+        """Obtiene la cantidad de items pendientes."""
+        return len(self.get_pending_content(source))
+    
     def get_pending_content(self, source: Optional[str] = None) -> list[dict]:
         """
         Obtiene contenido pendiente de procesar.

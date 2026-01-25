@@ -6,6 +6,7 @@ Coordina scraping → LLM → TTS → Video.
 import logging
 import os
 import re
+import random
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -13,11 +14,11 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
 from rich.panel import Panel
 
 from .scraper import RSSClient, RedditClient, YouTubeClient, BlogScraper
-from .llm import OpenRouterClient, ScriptValidator
+from .llm import OpenRouterClient, ScriptValidator, SceneGenerator
 from .tts.edge_tts import EdgeTTSEngine
 from .video import SubtitleGenerator, VideoRenderer, PexelsClient
 from .utils import ContentCache
@@ -31,33 +32,44 @@ console = Console()
 class VideoPipeline:
     """Orquestador principal del pipeline de creación de videos."""
     
+    WIDTH = 1080
+    HEIGHT = 1920
+    FPS = 30
+    
     def __init__(
         self,
         output_dir: str = "./output",
         temp_dir: str = "./temp",
         cache_dir: str = "./cache",
-        assets_dir: str = "./assets"
+        assets_dir: str = "./assets",
+        tts_engine: str = "edge"
     ):
         """
-        Inicializa el pipeline.
-        
+        Inicializa el pipeline de video.
         Args:
             output_dir: Directorio para videos finales
             temp_dir: Directorio para archivos temporales
             cache_dir: Directorio para cache
             assets_dir: Directorio para assets (fondos)
+            tts_engine: Motor de TTS a usar ('edge' o 'xtts')
         """
         self.output_dir = Path(output_dir)
         self.temp_dir = Path(temp_dir)
         self.cache_dir = Path(cache_dir)
         self.assets_dir = Path(assets_dir)
+        self.tts_engine_type = tts_engine
         
         # Crear directorios
         for dir_path in [self.output_dir, self.temp_dir, self.cache_dir, self.assets_dir]:
             dir_path.mkdir(parents=True, exist_ok=True)
+            
+        # Cargar configuración
+        self.config = self._load_config()
         
         # Inicializar componentes
-        self.cache = ContentCache(str(self.cache_dir))
+        self.cache = ContentCache()
+        self.llm = OpenRouterClient()
+        self.scene_generator = SceneGenerator(self.llm)
         self.validator = ScriptValidator()
         
         # Componentes lazy-loaded
@@ -69,22 +81,41 @@ class VideoPipeline:
         self._uploader = None
         self._webhook = None
         self._retry_queue = None
-    
+    def _load_config(self) -> dict:
+        """Carga la configuración del pipeline."""
+        import yaml
+        config_path = Path("config/config.yaml")
+        if config_path.exists():
+            with open(config_path, "r") as f:
+                return yaml.safe_load(f)
+        return {}
+
     @property
     def llm_client(self) -> OpenRouterClient:
         if self._llm_client is None:
             self._llm_client = OpenRouterClient(cache=self.cache)
         return self._llm_client
-    
+
     @property
-    def tts_engine(self) -> EdgeTTSEngine:
+    def tts_engine(self):
         if self._tts_engine is None:
-            # Usar Edge-TTS con voz colombiana masculina
-            self._tts_engine = EdgeTTSEngine(
-                output_dir=str(self.temp_dir),
-                voice="es-CO-GonzaloNeural"  # Gonzalo de Colombia
-            )
+            if self.tts_engine_type == "xtts":
+                from .tts.xtts import XTTSEngine
+                logger.info("Usando motor TTS Pro (XTTS v2)")
+                self._tts_engine = XTTSEngine(
+                    output_dir=str(self.temp_dir),
+                    language="es"
+                )
+            else:
+                from .tts.edge_tts import EdgeTTSEngine
+                # Usar Edge-TTS con voz chilena
+                logger.info("Usando motor TTS Rápido (Edge-TTS Chile)")
+                self._tts_engine = EdgeTTSEngine(
+                    output_dir=str(self.temp_dir),
+                    voice="es-CL-LorenzoNeural"
+                )
         return self._tts_engine
+
     
     @property
     def subtitle_gen(self) -> SubtitleGenerator:
@@ -153,13 +184,11 @@ class VideoPipeline:
         first_hook = hooks[0] if hooks else title
         narration_preview = narration[:200] + "..." if len(narration) > 200 else narration
         
-        description = f"""{first_hook}
-
-{narration_preview}
-
-✨ Si este contenido te ayudó, ¡dale like y comparte!
-🔔 Sígueme para más tips de bienestar diario.
-💬 Cuéntame en los comentarios: ¿qué tema te gustaría ver?"""
+        
+        description = f"{first_hook}\n\n{narration_preview}\n\n" \
+                     f"Si este contenido te ayudó, ¡dale like y comparte!\n" \
+                     f"Sígueme para más tips de bienestar diario.\n" \
+                     f"Cuéntame en los comentarios: ¿qué tema te gustaría ver?"
         
         # Generar hashtags (máximo 30 para Instagram, 5 principales para TikTok)
         base_hashtags = [
@@ -178,52 +207,59 @@ class VideoPipeline:
         hashtags_str = " ".join([f"#{tag}" for tag in unique_hashtags])
         
         # Crear contenido del archivo
-        metadata_content = f"""# {title}
-
-## 📹 Archivo de Video
-`{video_filename}`
-
----
-
-## 📝 Descripción para Redes Sociales
-
-{description}
-
----
-
-## 🏷️ Hashtags
-
-### Para TikTok/Reels (Top 5)
-{" ".join([f"#{tag}" for tag in unique_hashtags[:5]])}
-
-### Para Instagram/YouTube (Completos)
-{hashtags_str}
-
----
-
-## 🎣 Hooks Alternativos
-Usa estos hooks para versiones del video o para probar engagement:
-
-"""
-        for i, hook in enumerate(hooks, 1):
-            metadata_content += f"{i}. {hook}\n"
+        # Crear contenido usando lista para evitar errores de comillas triples
+        lines = [
+            f"# {title}",
+            "",
+            "## 📹 Archivo de Video",
+            f"`{video_filename}`",
+            "",
+            "---",
+            "",
+            "## 📝 Descripción para Redes Sociales",
+            "",
+            description,
+            "",
+            "---",
+            "",
+            "## 🏷️ Hashtags",
+            "",
+            "### Para TikTok/Reels (Top 5)",
+            " ".join([f"#{tag}" for tag in unique_hashtags[:5]]),
+            "",
+            "### Para Instagram/YouTube (Completos)",
+            hashtags_str,
+            "",
+            "---",
+            "",
+            "## 🎣 Hooks Alternativos",
+            "Usa estos hooks para versiones del video o para probar engagement:",
+            ""
+        ]
         
-        metadata_content += f"""
----
-
-## 📊 Keywords SEO
-{", ".join(keywords)}
-
----
-
-## 🔗 Fuente Original
-{source_url if source_url else "Contenido original"}
-
----
-
-*Generado automáticamente por Creador de Videos Virales*
-*Fecha: {datetime.now().strftime("%Y-%m-%d %H:%M")}*
-"""
+        for i, hook in enumerate(hooks, 1):
+            lines.append(f"{i}. {hook}")
+            
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 📊 Keywords SEO",
+            ", ".join(keywords),
+            "",
+            "---",
+            "",
+            "## 🔗 Fuente Original",
+            source_url if source_url else "Contenido original",
+            "",
+            "---",
+            "",
+            "*Generado automáticamente por Creador de Videos Virales*",
+            f"*Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}*",
+            ""
+        ])
+        
+        metadata_content = "\n".join(lines)
         
         # Guardar archivo
         metadata_path = video_folder / "metadata.md"
@@ -234,54 +270,136 @@ Usa estos hooks para versiones del video o para probar engagement:
     
     def step_scrape(self, sources: Optional[list[str]] = None) -> list[dict]:
         """
-        Paso 1: Obtener contenido de fuentes.
-        
-        Args:
-            sources: Lista de fuentes (rss, reddit, youtube, blogs) o None para todas
-            
-        Returns:
-            Lista de contenido obtenido
+        Paso 1: Obtener contenido de fuentes seleccionadas.
+        Si hay suficiente contenido en cache, NO hace scraping (a menos que se fuerce).
         """
+        # Verificar contenido pendiente
+        pending_count = self.cache.get_pending_count()
+        if pending_count >= 5 and not sources:
+            console.print(f"[green]✓ Usando contenido en cache ({pending_count} items pendientes)[/green]")
+            return self.cache.get_pending_content()
+
         console.print(Panel("[bold cyan]PASO 1: Obteniendo contenido[/bold cyan]"))
         
         all_content = []
-        sources = sources or ["rss", "reddit", "youtube", "blogs"]
         
-        scrapers = {
-            "rss": RSSClient(cache=self.cache),
-            "reddit": RedditClient(cache=self.cache),
-            "youtube": YouTubeClient(cache=self.cache),
-            "blogs": BlogScraper(cache=self.cache),
-        }
+        # Default sources (sin YouTube por lentitud)
+        if not sources:
+            sources = ["rss", "reddit", "blogs"]
+            
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            console=console
+        ) as progress:
+            
+            # RSS
+            if "rss" in sources or "all" in sources:
+                task = progress.add_task("Scraping rss...", total=None)
+                try:
+                    rss_client = RSSClient(cache=self.cache)
+                    items = rss_client.fetch_all()
+                    all_content.extend(items)
+                    progress.update(task, description=f"[green]✓ rss: {len(items)} items")
+                except Exception as e:
+                    logger.error(f"Error scraping RSS: {e}")
+            
+            # Reddit
+            if "reddit" in sources or "all" in sources:
+                task = progress.add_task("Scraping reddit...", total=None)
+                try:
+                    reddit_client = RedditClient(cache=self.cache)
+                    items = reddit_client.fetch_top_posts(limit=15) 
+                    all_content.extend(items)
+                    progress.update(task, description=f"[green]✓ reddit: {len(items)} items")
+                except Exception as e:
+                    logger.error(f"Error scraping Reddit: {e}")
+
+            # Blogs
+            if "blogs" in sources or "all" in sources:
+                task = progress.add_task("Scraping blogs...", total=None)
+                try:
+                    blog_scraper = BlogScraper(cache=self.cache)
+                    items = blog_scraper.scrape_configured_blogs()
+                    all_content.extend(items)
+                    progress.update(task, description=f"[green]✓ blogs: {len(items)} items")
+                except Exception as e:
+                    logger.error(f"Error scraping Blogs: {e}")
+            
+            # YouTube (Solo si se pide explícitamente)
+            if sources and "youtube" in sources: 
+                task = progress.add_task("Scraping youtube...", total=None)
+                try:
+                    yt_client = YouTubeClient(cache=self.cache)
+                    items = yt_client.search_videos("wellness tips", limit=3)
+                    all_content.extend(items)
+                    progress.update(task, description=f"[green]✓ youtube: {len(items)} items")
+                except Exception as e:
+                    logger.error(f"Error scraping YouTube: {e}")
+        
+        console.print(f"\n[green]Total: {len(all_content)} items obtenidos[/green]\n")
+        return all_content
+    
+    def step_get_scene_assets(
+        self,
+        scenes: list[dict],
+        prefer_video: bool = True
+    ) -> list[str]:
+        """
+        Paso 4: Obtener fondos para cada escena.
+        
+        Args:
+            scenes: Lista de escenas con visual_keywords
+            prefer_video: Si preferir video
+            
+        Returns:
+            Lista de rutas a archivos de fondo (uno por escena)
+        """
+        console.print(Panel(f"[bold cyan]PASO 4: Obteniendo fondos para {len(scenes)} escenas[/bold cyan]"))
+        
+        background_paths = []
         
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
+            TaskProgressColumn(),
             console=console
         ) as progress:
-            for source in sources:
-                if source not in scrapers:
-                    continue
+            task = progress.add_task("Descargando assets...", total=len(scenes))
+            
+            for i, scene in enumerate(scenes):
+                keywords = scene.get("visual_keywords", [])
+                if not keywords:
+                    keywords = ["abstract", "background"]
                 
-                task = progress.add_task(f"Scraping {source}...", total=None)
+                progress.update(task, description=f"Escena {i+1}: {', '.join(keywords[:2])}...")
                 
-                try:
-                    scraper = scrapers[source]
-                    items = scraper.fetch_all()
-                    
-                    for item in items:
-                        all_content.append(item.to_dict() if hasattr(item, "to_dict") else item)
-                    
-                    progress.update(task, description=f"[green]✓ {source}: {len(items)} items")
-                    
-                except Exception as e:
-                    logger.error(f"Error scraping {source}: {e}")
-                    progress.update(task, description=f"[red]✗ {source}: error")
+                # Intentar obtener video único
+                media_type = "video" if prefer_video else "photo"
+                path = self.pexels.get_random_background(keywords, media_type)
+                
+                if not path:
+                    # Fallback
+                    path = self.pexels.get_random_background(keywords, "photo")
+                
+                if path:
+                    background_paths.append(path)
+                else:
+                    logger.warning(f"No se encontró fondo para escena {i}")
+                    # Usar el anterior o uno genérico
+                    if background_paths:
+                        background_paths.append(background_paths[-1])
+                    else:
+                        background_paths.append(None) # El renderer manejará esto
+                
+                progress.advance(task)
         
-        console.print(f"\n[green]Total: {len(all_content)} items obtenidos[/green]\n")
-        return all_content
-    
+        console.print(f"[green]✓ {len(background_paths)} fondos obtenidos[/green]\n")
+        return background_paths
+
     def step_generate_script(
         self,
         content: Optional[dict] = None,
@@ -289,13 +407,6 @@ Usa estos hooks para versiones del video o para probar engagement:
     ) -> Optional[dict]:
         """
         Paso 2: Generar guión con LLM.
-        
-        Args:
-            content: Contenido específico a procesar
-            from_cache: Si usar contenido del cache
-            
-        Returns:
-            Guión generado o None
         """
         console.print(Panel("[bold cyan]PASO 2: Generando guión[/bold cyan]"))
         
@@ -315,7 +426,6 @@ Usa estos hooks para versiones del video o para probar engagement:
         if content.get("title"):
             text_parts.append(f"Título: {content['title']}")
         
-        # Prioridad de contenido: Transcripción > Contenido > Resumen
         if content.get("transcript"):
             text_parts.append(f"Transcripción del video:\n{content['transcript']}")
         elif content.get("content"):
@@ -342,22 +452,17 @@ Usa estos hooks para versiones del video o para probar engagement:
                 progress.update(task, description="[red]✗ Error generando guión")
                 return None
         
-        # Validar guión
-        result = self.validator.validate(script)
+        # Validar y corregir estructura de escenas
+        if "scenes" not in script:
+            console.print("[yellow]Guión sin escenas, generando estructura simple...[/yellow]")
+            script["scenes"] = [{
+                "narration_chunk": script.get("narration_text", ""),
+                "visual_keywords": script.get("keywords", [])
+            }]
         
-        if not result.is_valid:
-            console.print("[red]Errores en el guión:[/red]")
-            for error in result.errors:
-                console.print(f"  • {error}")
-            
-            # Intentar corregir
-            script = self.validator.fix_common_issues(script)
-            result = self.validator.validate(script)
-        
-        if result.warnings:
-            console.print("[yellow]Advertencias:[/yellow]")
-            for warning in result.warnings[:3]:
-                console.print(f"  • {warning}")
+        # Reconstruir narration_text desde escenas si es necesario
+        if not script.get("narration_text"):
+            script["narration_text"] = " ".join([s.get("narration_chunk", "") for s in script["scenes"]])
         
         # Mostrar hooks para selección
         hooks = script.get("hooks_alternativos", [])
@@ -372,22 +477,31 @@ Usa estos hooks para versiones del video o para probar engagement:
         script_id = hashlib.sha256(source_url.encode()).hexdigest()[:12]
         self.cache.store_script(script_id, script)
         script["_id"] = script_id
-        script["source_url"] = source_url  # Guardar URL para metadata
+        script["source_url"] = source_url
         
-        # Marcar contenido como procesado para no repetirlo
+        # Marcar contenido como procesado
         content_url = content.get("url", "")
         if content_url:
-            # Primero intentar con source si existe
             content_source = content.get("source", "")
             if content_source:
                 self.cache.mark_processed(content_source, content_url)
             else:
-                # Si no hay source, buscar en todas las fuentes
                 self.cache.mark_processed_by_url(content_url)
-            console.print(f"[dim]✓ Contenido marcado como procesado[/dim]")
         
         console.print(f"\n[green]Guión guardado con ID: {script_id}[/green]\n")
         return script
+    
+    def _get_random_clip_from_folder(self, folder_name: str) -> Optional[str]:
+        """Obtiene un video aleatorio de una carpeta en assets."""
+        folder = self.assets_dir / folder_name
+        if not folder.exists():
+            return None
+            
+        videos = list(folder.glob("*.mp4")) + list(folder.glob("*.mov"))
+        if not videos:
+            return None
+            
+        return str(random.choice(videos))
     
     def step_generate_audio(
         self,
@@ -395,14 +509,7 @@ Usa estos hooks para versiones del video o para probar engagement:
         script_id: Optional[str] = None
     ) -> Optional[dict]:
         """
-        Paso 3: Generar audio con XTTS.
-        
-        Args:
-            script: Guión con narration_text y subtitles
-            script_id: ID para nombrar el archivo
-            
-        Returns:
-            Dict con audio_path, duration, subtitles ajustados
+        Paso 3: Generar audio con XTTS/Edge.
         """
         console.print(Panel("[bold cyan]PASO 3: Generando audio[/bold cyan]"))
         
@@ -426,102 +533,201 @@ Usa estos hooks para versiones del video o para probar engagement:
         console.print(f"[green]Duración final: {result['duration']:.2f}s[/green]\n")
         
         return result
-    
-    def step_get_background(
-        self,
-        keywords: list[str],
-        prefer_video: bool = True
-    ) -> Optional[str]:
-        """
-        Paso 4: Obtener fondo de Pexels.
-        
-        Args:
-            keywords: Palabras clave para buscar
-            prefer_video: Si preferir video sobre imagen
-            
-        Returns:
-            Ruta al archivo de fondo
-        """
-        console.print(Panel("[bold cyan]PASO 4: Obteniendo fondo[/bold cyan]"))
-        
-        console.print(f"[dim]Keywords: {', '.join(keywords[:3])}[/dim]")
-        
-        with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
-            task = progress.add_task("Buscando en Pexels...", total=None)
-            
-            media_type = "video" if prefer_video else "photo"
-            path = self.pexels.get_random_background(keywords, media_type)
-            
-            if path:
-                progress.update(task, description=f"[green]✓ {media_type.title()} descargado")
-            else:
-                progress.update(task, description="[yellow]! Intentando con imagen...")
-                path = self.pexels.get_random_background(keywords, "photo")
-        
-        if path:
-            console.print(f"[green]Fondo: {path}[/green]\n")
-        else:
-            console.print("[yellow]No se encontró fondo, usando color sólido[/yellow]\n")
-        
-        return path
-    
+
     def step_render_video(
         self,
         audio_path: str,
-        background_path: Optional[str],
+        background_paths: list[str],
         subtitles: list[dict],
         script_id: str,
+        scenes: list[dict] = None,
         image_effect: str = "zoom"
     ) -> Optional[str]:
         """
-        Paso 5: Renderizar video final.
-        
-        Args:
-            audio_path: Ruta al audio
-            background_path: Ruta al fondo (o None para color sólido)
-            subtitles: Lista de subtítulos con timings
-            script_id: ID para nombrar archivos
-            image_effect: Efecto para imágenes (zoom, pan, kenburns)
-            
-        Returns:
-            Ruta al video final
+        Paso 5: Renderizar video final (multi-escena + Intro/Outro).
         """
-        console.print(Panel("[bold cyan]PASO 5: Renderizando video[/bold cyan]"))
+        console.print(Panel("[bold cyan]PASO 5: Renderizando video (Multi-Escena)[/bold cyan]"))
         
-        # Generar subtítulos ASS
-        console.print("[dim]Generando subtítulos...[/dim]")
+        # 1. Buscar Intro y Outro
+        # Restauro intros/outros y busco su texto asociado para subtítulos
+        intro_path = self._get_random_clip_from_folder("intros")
+        outro_path = self._get_random_clip_from_folder("outros")
+        
+        intro_dur = 0.0
+        outro_dur = 0.0
+        intro_text = ""
+        outro_text = ""
+        
+        if intro_path:
+            intro_dur = self.renderer.get_duration(intro_path)
+            # Buscar texto
+            txt_path = Path(intro_path).with_suffix(".txt")
+            if txt_path.exists():
+                with open(txt_path, "r", encoding="utf-8") as f:
+                    intro_text = f.read().strip()
+            else:
+                intro_text = "Bienvenidos" # Default
+                
+            console.print(f"[green]✓ Intro encontrada ({intro_dur:.1f}s): {Path(intro_path).name}[/green]")
+            
+        if outro_path:
+            outro_dur = self.renderer.get_duration(outro_path)
+            # Buscar texto
+            txt_path = Path(outro_path).with_suffix(".txt")
+            if txt_path.exists():
+                with open(txt_path, "r", encoding="utf-8") as f:
+                    outro_text = f.read().strip()
+            else:
+                outro_text = "Sígueme para más" # Default
+                
+            console.print(f"[green]✓ Outro encontrada ({outro_dur:.1f}s): {Path(outro_path).name}[/green]")
+            
+        # 2. Ajustar Audio (padding de silencio)
+        final_audio_path = audio_path
+        if intro_dur > 0 or outro_dur > 0:
+            console.print("[dim]Ajustando timeline de audio (Intro/Outro)...[/dim]")
+            final_audio_path = str(self.temp_dir / f"audio_padding_{script_id}.mp3")
+            
+            # Usar la nueva función que preserva el audio de la intro
+            if not self.renderer.combine_audio_with_intro(
+                audio_path, intro_path, outro_path, final_audio_path
+            ):
+                console.print("[red]Error mezclando audio de intro[/red]")
+                return None
+        
+        # 3. Ajustar Subtítulos (offset + inyección)
+        final_subtitles = []
+        
+        # A) Subtítulo de Intro
+        if intro_dur > 0 and intro_text:
+            final_subtitles.append({
+                "start": 0.0,
+                "end": intro_dur - 0.5, # Un poco menos para no encimar
+                "text": intro_text
+            })
+            
+        # B) Subtítulos principales desplazados
+        if intro_dur > 0:
+            console.print(f"[dim]Desplazando subtítulos +{intro_dur:.1f}s...[/dim]")
+            for sub in subtitles:
+                new_sub = sub.copy()
+                new_sub["start"] += intro_dur
+                new_sub["end"] += intro_dur
+                final_subtitles.append(new_sub)
+        else:
+            final_subtitles.extend(subtitles)
+            
+        # C) Subtítulo de Outro
+        if outro_dur > 0 and outro_text:
+            # Calcular fin total
+            # El audio final ya incluye outro, así que calculamos en base al start del último sub o duración de narración
+            # Mejor estimación: intro_dur + audio_duration (sin outro)
+            # Pero no tengo audio_duration aquí fácil. 
+            # Uso el final del último subtítulo como referencia de inicio del outro
+            last_end = final_subtitles[-1]["end"] if final_subtitles else intro_dur
+            # Ajustar para que coincida con el video de outro (que está al final)
+            # El renderer pega el video AL FINAL.
+            # Necesitamos saber la duración del MAIN video.
+            # Estimación: last_end es aprox el final del main.
+            
+            final_subtitles.append({
+                "start": last_end + 0.5,
+                "end": last_end + outro_dur,
+                "text": outro_text
+            })
+        
+        # 4. Generar archivo de subtítulos ASS
+        console.print("[dim]Generando subtítulos animados...[/dim]")
         subs_path = self.subtitle_gen.generate_animated(
-            subtitles, f"subs_{script_id}", animation="fade"
+            final_subtitles, f"subs_{script_id}", animation="fade"
         )
         
         if not subs_path:
             console.print("[red]Error generando subtítulos[/red]")
             return None
         
-        # Determinar tipo de fondo
-        is_image = False
-        if background_path:
-            is_image = background_path.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
-        else:
-            # Crear fondo de color
+        # 5. Configurar escenas
+        scene_configs = []
+        
+        # Agregar Intro
+        if intro_path:
+            scene_configs.append({
+                "path": intro_path,
+                "duration": intro_dur,
+                "is_image": False
+            })
+            
+        # Escenas del contenido
+        if isinstance(background_paths, list) and len(background_paths) > 1 and scenes:
+            # Calcular duraciones de escenas
+            total_chars = sum(len(s.get("narration_chunk", "")) for s in scenes)
+            
+            # Duración del audio ORIGINAL (sin silencios)
             from pydub import AudioSegment
             audio = AudioSegment.from_file(audio_path)
-            duration = len(audio) / 1000.0
-            background_path = self.renderer.create_color_background(duration)
+            content_duration = len(audio) / 1000.0
+            
+            for i, scene in enumerate(scenes):
+                if i >= len(background_paths):
+                    break
+                    
+                char_count = len(scene.get("narration_chunk", ""))
+                ratio = char_count / total_chars if total_chars > 0 else 0
+                duration = content_duration * ratio
+                
+                # Para la última escena, asegurar que cubra todo el resto por decimales
+                if i == len(scenes) - 1:
+                    # Sumar lo que llevamos
+                    current_total = sum(c["duration"] for c in scene_configs if c["path"] not in [intro_path])
+                    remaining = content_duration - current_total
+                    if remaining > 0:
+                        duration = remaining
+                
+                bg_path = background_paths[i]
+                if bg_path: # Puede ser None
+                    scene_configs.append({
+                        "path": bg_path,
+                        "duration": duration,
+                        "is_image": bg_path.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+                    })
+        else:
+            # Modo simple (un solo video de fondo)
+            bg_path = background_paths[0] if isinstance(background_paths, list) and background_paths else background_paths
+            if isinstance(background_paths, str):
+                bg_path = background_paths
+            
+            if bg_path:
+                # Duración es la del audio original
+                from pydub import AudioSegment
+                audio = AudioSegment.from_file(audio_path)
+                content_duration = len(audio) / 1000.0
+                
+                scene_configs.append({
+                    "path": bg_path,
+                    "duration": content_duration,
+                    "is_image": bg_path.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))
+                })
         
-        # Renderizar
+        # Agregar Outro
+        if outro_path:
+            scene_configs.append({
+                "path": outro_path,
+                "duration": outro_dur,
+                "is_image": False
+            })
+
+        # 6. Renderizar
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_name = f"video_{script_id}_{timestamp}"
         
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as progress:
-            task = progress.add_task("Renderizando con FFmpeg...", total=None)
+            task = progress.add_task("Renderizando Multi-Escena con FFmpeg...", total=None)
             
-            video_path = self.renderer.render_final(
-                audio_path,
-                background_path,
+            video_path = self.renderer.render_multiscene(
+                final_audio_path,
+                scene_configs,
                 subs_path,
                 output_name,
-                is_background_image=is_image,
                 image_effect=image_effect
             )
             
@@ -734,21 +940,10 @@ Usa estos hooks para versiones del video o para probar engagement:
     ) -> Optional[str]:
         """
         Ejecuta el pipeline completo para UN video.
-        
-        Args:
-            sources: Fuentes de scraping
-            prefer_video_bg: Si preferir video sobre imagen de fondo
-            image_effect: Efecto para imágenes de fondo
-            skip_scrape: Si saltar el paso de scraping
-            publish: Si publicar el video después de generarlo
-            publish_mode: 'interactive' o 'automatic' (default desde .env)
-            
-        Returns:
-            Ruta al video final o None
         """
         console.print(Panel(
-            "[bold magenta]🚀 PIPELINE COMPLETO[/bold magenta]\n"
-            "Scraping → LLM → TTS → Video → Publicar",
+            "[bold magenta]🚀 PIPELINE COMPLETO (Siguiente Nivel)[/bold magenta]\n"
+            "Scraping → LLM (Escenas) → TTS → Multi-Video → Publicar",
             title="Creador de Videos Virales"
         ))
         
@@ -760,7 +955,7 @@ Usa estos hooks para versiones del video o para probar engagement:
                 if not content:
                     console.print("[yellow]No se obtuvo contenido nuevo. Usando cache...[/yellow]")
             
-            # Paso 2: Generar guión
+            # Paso 2: Generar guión (ahora con escenas)
             script = self.step_generate_script(from_cache=True)
             
             if not script:
@@ -768,6 +963,7 @@ Usa estos hooks para versiones del video o para probar engagement:
                 return None
             
             script_id = script.get("_id", "video")
+            scenes = script.get("scenes", [])
             
             # Paso 3: Generar audio
             audio_result = self.step_generate_audio(script, script_id)
@@ -776,17 +972,17 @@ Usa estos hooks para versiones del video o para probar engagement:
                 console.print("[red]No se pudo generar el audio[/red]")
                 return None
             
-            # Paso 4: Obtener fondo
-            keywords = script.get("keywords", ["wellness", "health", "calm"])
-            background = self.step_get_background(keywords, prefer_video_bg)
+            # Paso 4: Obtener fondos para CADA escena
+            background_paths = self.step_get_scene_assets(scenes, prefer_video_bg)
             
-            # Paso 5: Renderizar
+            # Paso 5: Renderizar Multi-Escena
             video_path = self.step_render_video(
                 audio_result["audio_path"],
-                background,
+                background_paths,
                 audio_result["subtitles"],
                 script_id,
-                image_effect
+                scenes=scenes,
+                image_effect=image_effect
             )
             
             if not video_path:
@@ -796,32 +992,30 @@ Usa estos hooks para versiones del video o para probar engagement:
             # Paso 6: Crear carpeta del video y metadata
             console.print(Panel("[bold cyan]PASO 6: Organizando archivos[/bold cyan]"))
             
-            # Crear nombre de carpeta legible basado en el título
+            # Crear carpeta
+            # Crear carpeta con fecha y título
             import unicodedata
-            title = script.get("title", "video")
+            safe_title = unicodedata.normalize('NFKD', script.get('title', 'video')).encode('ASCII', 'ignore').decode('ASCII')
+            safe_title = re.sub(r'[^\w\s-]', '', safe_title).strip().lower()
+            safe_title = re.sub(r'[-\s]+', '_', safe_title)
             
-            # Convertir título a slug legible
-            slug = unicodedata.normalize("NFKD", title)
-            slug = slug.encode("ascii", "ignore").decode("ascii")  # Remover acentos
-            slug = re.sub(r"[^\w\s-]", "", slug)  # Solo letras, números, espacios, guiones
-            slug = re.sub(r"[\s_]+", "_", slug)  # Espacios a guiones bajos
-            slug = slug.strip("_").lower()[:50]  # Limitar longitud
+            date_str = datetime.now().strftime("%Y%m%d")
+            folder_name = f"{date_str}_{safe_title[:30]}"
+            video_folder = self.output_dir / folder_name
+            video_folder.mkdir(exist_ok=True)
             
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            video_folder_name = f"{slug}_{timestamp}"
-            video_folder = self.output_dir / video_folder_name
-            video_folder.mkdir(parents=True, exist_ok=True)
-            
-            # Mover video a la carpeta
+            # Mover video
+            new_video_path = video_folder / "video.mp4"
             import shutil
-            video_filename = Path(video_path).name
-            new_video_path = video_folder / video_filename
             shutil.move(video_path, new_video_path)
             
-            # Generar metadata.md
-            metadata_path = self._generate_video_metadata(video_folder, script, video_filename)
+            # Generar metadata
+            metadata_path = self._generate_video_metadata(
+                video_folder=video_folder,
+                script=script,
+                video_filename="video.mp4"
+            )
             
-            console.print(f"[green]✓ Carpeta creada: {video_folder}[/green]")
             console.print(f"[green]✓ Metadata generada: {metadata_path}[/green]")
             console.print(f"\n[bold green]🎬 Video listo: {new_video_path}[/bold green]\n")
             
@@ -973,7 +1167,7 @@ Usa estos hooks para versiones del video o para probar engagement:
 
 
 def main():
-    """Punto de entrada CLI."""
+    "Punto de entrada CLI."
     import argparse
     
     parser = argparse.ArgumentParser(
@@ -988,6 +1182,7 @@ def main():
     parser.add_argument("--script", action="store_true", help="Solo generar guión desde cache")
     parser.add_argument("--pending", action="store_true", help="Mostrar cantidad de contenido pendiente")
     parser.add_argument("--sources", nargs="+", help="Fuentes para scraping (rss reddit youtube blogs)")
+    parser.add_argument("--tts", type=str, choices=["edge", "xtts"], default="edge", help="Motor TTS a usar (edge=rápido, xtts=calidad)")
     parser.add_argument("--video-bg", action="store_true", default=True, help="Preferir video de fondo")
     parser.add_argument("--image-bg", action="store_true", help="Preferir imagen de fondo")
     parser.add_argument("--effect", choices=["zoom", "pan", "kenburns"], default="zoom",
@@ -1006,7 +1201,7 @@ def main():
     
     args = parser.parse_args()
     
-    pipeline = VideoPipeline()
+    pipeline = VideoPipeline(tts_engine=args.tts)
     
     try:
         if args.trend_hunter:

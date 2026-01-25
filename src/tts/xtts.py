@@ -5,6 +5,12 @@ Optimizado para español con chunking automático.
 
 import logging
 import os
+
+# Aceptar licencia de Coqui XTTS automáticamente
+# Aceptar licencia de Coqui XTTS automáticamente
+os.environ["COQUI_TOS_AGREED"] = "1"
+os.environ["TORCHAUDIO_BACKEND"] = "soundfile"
+
 import re
 import time
 from pathlib import Path
@@ -23,54 +29,48 @@ MAX_CHUNK_LENGTH = 250  # Caracteres máximos por chunk para XTTS
 DEFAULT_SPEAKER_WAV = None  # Usar voz por defecto
 
 
+# Regex de limpieza agresiva
 def clean_text_for_tts(text: str) -> str:
     """
     Limpia texto para síntesis TTS, removiendo elementos problemáticos.
-    
-    Args:
-        text: Texto original
-        
-    Returns:
-        Texto limpio para TTS
     """
     import re
     
-    # Remover URLs
+    # 1. Eliminar instrucciones de guión entre paréntesis o corchetes
+    # Ej: (Pausa dramática), [Risa], [Música de fondo]
+    text = re.sub(r'\[.*?\]', '', text)
+    text = re.sub(r'\(.*?\)', '', text)
+    
+    # 2. Eliminar líneas de metadata o dirección técnica
+    # Ej: "Scene 1:", "Visual:", "Cut to:", "Camera:", "Narrator:"
+    text = re.sub(r'(?mi)^(Scene|Visual|Cut to|Camera|Narrator|Angle|Shot).*?[:\n]', '', text)
+    
+    # 3. Eliminar URLs
     text = re.sub(r'https?://\S+', '', text)
     text = re.sub(r'www\.\S+', '', text)
     
-    # Remover menciones y hashtags
+    # 4. Eliminar menciones y hashtags
     text = re.sub(r'[@#]\w+', '', text)
     
-    # Remover emojis (rangos Unicode comunes)
+    # 5. Eliminar emojis
     emoji_pattern = re.compile("["
-        u"\U0001F600-\U0001F64F"  # emoticons
-        u"\U0001F300-\U0001F5FF"  # símbolos y pictogramas
-        u"\U0001F680-\U0001F6FF"  # transporte y mapas
-        u"\U0001F1E0-\U0001F1FF"  # banderas
+        u"\U0001F600-\U0001F64F"
+        u"\U0001F300-\U0001F5FF"
+        u"\U0001F680-\U0001F6FF"
+        u"\U0001F1E0-\U0001F1FF"
         u"\U00002702-\U000027B0"
         u"\U000024C2-\U0001F251"
         "]+", flags=re.UNICODE)
     text = emoji_pattern.sub('', text)
     
-    # Remover caracteres especiales que causan problemas
+    # 6. Limpieza final de caracteres y espacios
     text = re.sub(r'[*_~`|<>{}[\]\\]', '', text)
+    text = re.sub(r'^\d+\.\s*', '', text, flags=re.MULTILINE) # Listas numeradas
+    text = re.sub(r'^[-•]\s*', '', text, flags=re.MULTILINE) # Viñetas
+    text = re.sub(r'\s+', ' ', text) # Espacios múltiples
     
-    # Remover números de lista al inicio (1. 2. etc.)
-    text = re.sub(r'^\d+\.\s*', '', text, flags=re.MULTILINE)
-    
-    # Remover guiones de lista
-    text = re.sub(r'^[-•]\s*', '', text, flags=re.MULTILINE)
-    
-    # Normalizar espacios múltiples
-    text = re.sub(r'\s+', ' ', text)
-    
-    # Normalizar puntuación múltiple
+    # Puntuación
     text = re.sub(r'[.]{2,}', '.', text)
-    text = re.sub(r'[!]{2,}', '!', text)
-    text = re.sub(r'[?]{2,}', '?', text)
-    
-    # Asegurar espacios después de puntuación
     text = re.sub(r'([.!?])([A-ZÁÉÍÓÚa-záéíóú])', r'\1 \2', text)
     
     return text.strip()
@@ -87,19 +87,33 @@ class XTTSEngine:
     ):
         """
         Inicializa el motor XTTS.
-        
-        Args:
-            output_dir: Directorio para archivos de audio
-            language: Idioma para síntesis (es, en, etc.)
-            speaker_wav: Archivo WAV de referencia para clonar voz (opcional)
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Crear directorio de voces personalizadas
+        self.voices_dir = Path("assets/voices")
+        self.voices_dir.mkdir(parents=True, exist_ok=True)
         
         self.language = language
         self.speaker_wav = speaker_wav
         self.model = None
         self._initialized = False
+        
+        # Buscar voz configurada o usar default
+        if speaker_wav and os.path.exists(speaker_wav):
+            self.speaker_wav = speaker_wav
+        else:
+            # Buscar si hay alguna voz en assets/voices
+            voices = self.list_voices()
+            if voices:
+                self.speaker_wav = str(voices[0])
+                logger.info(f"Usando primera voz encontrada: {self.speaker_wav}")
+    
+    def list_voices(self) -> list[Path]:
+        """Lista archivos de audio en assets/voices."""
+        extensions = {".wav", ".mp3", ".m4a", ".flac"}
+        return [f for f in self.voices_dir.iterdir() if f.suffix.lower() in extensions]
     
     def _ensure_initialized(self):
         """Inicializa el modelo XTTS si no está cargado."""
@@ -107,6 +121,18 @@ class XTTSEngine:
             return
         
         try:
+            # FIX: Monkeypatch torch.load para compatibilidad con PyTorch 2.6+
+            # XTTS carga pickles antiguos que requieren weights_only=False
+            import torch
+            _original_load = torch.load
+            
+            def _safe_load(*args, **kwargs):
+                if "weights_only" not in kwargs:
+                    kwargs["weights_only"] = False
+                return _original_load(*args, **kwargs)
+                
+            torch.load = _safe_load
+            
             from TTS.api import TTS
             
             logger.info("Cargando modelo XTTS v2... (esto puede tardar)")

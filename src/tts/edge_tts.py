@@ -38,8 +38,9 @@ SPANISH_VOICES = {
     "es-AR-ElenaNeural": "Elena (Argentina, femenino)",
 }
 
-# Voz por defecto: Gonzalo de Colombia (masculino, natural)
-DEFAULT_VOICE = "es-CO-GonzaloNeural"
+# Voz por defecto (Chile - Hombre)
+DEFAULT_VOICE = "es-CL-LorenzoNeural"
+# Alternativa: "es-CL-SalomeNeural" (Mujer)
 
 
 def clean_text_for_tts(text: str) -> str:

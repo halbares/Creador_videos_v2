@@ -233,12 +233,23 @@ run_pipeline() {
             echo "  4. Obtener background de Pexels"
             echo "  5. Renderizar video final"
             echo ""
-            echo -e "${YELLOW}⚠ El proceso puede tardar varios minutos${NC}"
+            echo ""
+            echo "Selecciona calidad de audio:"
+            echo "  1. RECOMENDADO (Voz Chilena Pro - EdgeTTS)"
+            echo "  2. Experimental (Clonación XTTS - Lento)"
+            read -p "Opción (default 1): " tts_opt
+            
+            tts_flag="--tts edge"
+            if [ "$tts_opt" = "2" ]; then
+                tts_flag="--tts xtts"
+            fi
+            
+            echo -e "${YELLOW}El proceso puede tardar varios minutos${NC}"
             echo ""
             read -p "¿Continuar? (s/n): " confirm
             
             if [[ "$confirm" =~ ^[Ss]$ ]]; then
-                python -m src.pipeline --full
+                python -m src.pipeline --full $tts_flag
             fi
             ;;
         2)
@@ -250,10 +261,21 @@ run_pipeline() {
                 echo -e "${YELLOW}Generando ${count} videos...${NC}"
                 echo -e "${YELLOW}⚠ Esto puede tardar MUCHO tiempo${NC}"
                 echo ""
+                
+                echo "Selecciona calidad de audio:"
+                echo "  1. RECOMENDADO (Voz Chilena Pro - EdgeTTS)"
+                echo "  2. Experimental (Clonación XTTS - Lento)"
+                read -p "Opción (default 1): " tts_opt
+                
+                tts_flag="--tts edge"
+                if [ "$tts_opt" = "2" ]; then
+                    tts_flag="--tts xtts"
+                fi
+                
                 read -p "¿Continuar? (s/n): " confirm
                 
                 if [[ "$confirm" =~ ^[Ss]$ ]]; then
-                    python -m src.pipeline --count "$count"
+                    python -m src.pipeline --count "$count" $tts_flag
                 fi
             else
                 echo -e "${RED}Número inválido${NC}"
@@ -264,10 +286,21 @@ run_pipeline() {
             echo -e "${YELLOW}⚠ MODO BATCH: Procesará TODO el cache pendiente${NC}"
             echo -e "${YELLOW}⚠ Esto puede tardar MUCHAS HORAS${NC}"
             echo ""
+            
+            echo "Selecciona calidad de audio:"
+            echo "  1. RECOMENDADO (Voz Chilena Pro - EdgeTTS)"
+            echo "  2. Experimental (Clonación XTTS - Lento)"
+            read -p "Opción (default 1): " tts_opt
+            
+            tts_flag="--tts edge"
+            if [ "$tts_opt" = "2" ]; then
+                tts_flag="--tts xtts"
+            fi
+            
             read -p "¿Estás seguro? (s/n): " confirm
             
             if [[ "$confirm" =~ ^[Ss]$ ]]; then
-                python -m src.pipeline --batch
+                python -m src.pipeline --batch $tts_flag
             fi
             ;;
         0) return ;;
@@ -522,7 +555,18 @@ menu_trend_hunter() {
         read -p "¿Comenzar la cacería? (s/n): " confirm
         
         if [[ "$confirm" =~ ^[Ss]$ ]]; then
-            activate_venv && python -m src.pipeline --trend-hunter "$count"
+            echo ""
+            echo "Selecciona calidad de audio:"
+            echo "  1. Normal (Rápido - EdgeTTS)"
+            echo "  2. Pro (Calidad Realista - XTTS v2)"
+            read -p "Opción (default 1): " tts_opt
+            
+            tts_flag="--tts edge"
+            if [ "$tts_opt" = "2" ]; then
+                tts_flag="--tts xtts"
+            fi
+
+            activate_venv && python -m src.pipeline --trend-hunter "$count" $tts_flag
         fi
     else
         echo -e "${RED}Número inválido${NC}"

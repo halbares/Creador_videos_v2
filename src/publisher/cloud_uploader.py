@@ -37,6 +37,7 @@ class CloudUploader:
         """
         self.remote = remote_name or os.getenv("GDRIVE_REMOTE", "gdrive")
         self.base_folder = base_folder or os.getenv("GDRIVE_FOLDER", "Videos/Creador")
+        self.is_ready = False
         
         # Verificar que rclone está disponible
         self._verify_rclone()
@@ -52,22 +53,26 @@ class CloudUploader:
             )
             
             if result.returncode != 0:
-                raise RuntimeError("rclone no está configurado correctamente")
+                logger.warning("rclone no está configurado correctamente (return code != 0)")
+                return
             
             remotes = result.stdout.strip().split("\n")
             remote_with_colon = f"{self.remote}:"
             
             if remote_with_colon not in remotes:
-                raise RuntimeError(
-                    f"Remote '{self.remote}' no encontrado. "
-                    f"Remotes disponibles: {remotes}"
+                logger.warning(
+                    f"Remote '{self.remote}' no encontrado en rclone. "
+                    f"Remotes disponibles: {remotes}. "
+                    "La subida automática estará deshabilitada."
                 )
+                return
+                
+            self.is_ready = True
                 
         except FileNotFoundError:
-            raise RuntimeError(
-                "rclone no está instalado. "
-                "Instálalo con: sudo pacman -S rclone"
-            )
+            logger.warning("rclone no está instalado. Instálalo con: sudo pacman -S rclone")
+        except Exception as e:
+            logger.warning(f"Error verificando rclone: {e}")
     
     def _run_rclone(self, args: list[str], timeout: int = 300) -> subprocess.CompletedProcess:
         """Ejecuta un comando rclone."""
@@ -83,6 +88,9 @@ class CloudUploader:
     
     def ensure_folder_exists(self) -> bool:
         """Crea la carpeta base si no existe."""
+        if not self.is_ready:
+            return False
+            
         remote_path = f"{self.remote}:{self.base_folder}"
         
         result = self._run_rclone(["mkdir", remote_path])
@@ -112,6 +120,10 @@ class CloudUploader:
             Ruta remota del archivo o None si falla
         """
         local_file = Path(local_path)
+        
+        if not self.is_ready:
+            logger.warning("Upload omitido: rclone no está listo")
+            return None
         
         if not local_file.exists():
             logger.error(f"Archivo no existe: {local_path}")
@@ -159,6 +171,9 @@ class CloudUploader:
         Returns:
             URL pública de descarga directa o None si falla
         """
+        if not self.is_ready:
+            return None
+            
         full_path = f"{self.remote}:{remote_path}"
         
         logger.info(f"Obteniendo enlace público para: {full_path}")
@@ -247,6 +262,9 @@ class CloudUploader:
         Returns:
             True si se eliminó correctamente
         """
+        if not self.is_ready:
+            return None
+            
         full_path = f"{self.remote}:{remote_path}"
         
         result = self._run_rclone(["delete", full_path])
@@ -260,6 +278,9 @@ class CloudUploader:
     
     def file_exists(self, remote_path: str) -> bool:
         """Verifica si un archivo existe en el remote."""
+        if not self.is_ready:
+            return None
+            
         full_path = f"{self.remote}:{remote_path}"
         
         result = self._run_rclone(["lsf", full_path])

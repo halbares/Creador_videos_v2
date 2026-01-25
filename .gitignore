@@ -30,3 +30,6 @@ logs/
 assets/*.mp4
 assets/*.jpg
 assets/*.png
+
+# Misc
+env creadorvideosV2.txt
